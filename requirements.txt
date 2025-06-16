@@ -1,0 +1,6 @@
+pandas
+matplotlib
+streamlit
+requests
+httpx
+mthrottle
