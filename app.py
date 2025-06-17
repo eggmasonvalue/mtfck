@@ -145,23 +145,20 @@ trend_symbol = None
 trend_title = None
 trend_df = None
 
-if run_analysis:
-    def show_trend_for_symbol(symbol, name):
-        trend_df = get_amt_financed_trend(symbol, from_date_db, to_date_db)
-        if not trend_df.empty:
-            st.session_state['trend_df'] = trend_df
-            st.session_state['trend_title'] = f"Amount Financed Trend for {symbol} ({name})"
-        else:
-            st.session_state['trend_df'] = None
-            st.session_state['trend_title'] = "No trend data available for this symbol in selected range."
+# Always run the analysis block to keep table and controls visible
+def show_trend_for_symbol(symbol, name):
+    trend_df = get_amt_financed_trend(symbol, from_date_db, to_date_db)
+    if not trend_df.empty:
+        st.session_state['trend_df'] = trend_df
+        st.session_state['trend_title'] = f"Amount Financed Trend for {symbol} ({name})"
+    else:
+        st.session_state['trend_df'] = None
+        st.session_state['trend_title'] = "No trend data available for this symbol in selected range."
 
-    # Place dropdown above table, button below dropdown, graph always at the top
+# --- Always get the latest analysis result for the current controls ---
+if rerun_needed or 'analysis_df' not in st.session_state or st.session_state.get('analysis_key') != key:
     if function == "Top by Amount Financed":
-        if rerun_needed:
-            df = get_top5_amt_financed(to_date_db, top_n, selected_industries)
-            st.session_state['results'][key] = df
-            st.session_state['last_range'][function] = current_range
-        df = st.session_state['results'][key]
+        df = get_top5_amt_financed(to_date_db, top_n, selected_industries)
         df['Amount Financed (₹ Cr)'] = df['Amount Financed (₹ Lakhs)'] / 100
         df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
         df = df.rename(columns={
@@ -169,43 +166,8 @@ if run_analysis:
             'name': 'Name',
             'Exposure %': 'Exposure (%)'
         })
-
-        # --- Graph at the top ---
-        if st.session_state.get('trend_df') is not None:
-            st.subheader(st.session_state.get('trend_title', 'Amount Financed Trend'))
-            st.line_chart(st.session_state['trend_df'].set_index('date')['amt_financed_cr'])
-        else:
-            st.subheader("Net Outstanding End (Daily Trend) (₹ Cr)")
-            if not df_chart.empty:
-                df_chart['date'] = pd.to_datetime(df_chart['date'])
-                df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100  # Convert from Lakhs to Cr
-                st.line_chart(df_chart.set_index('date')['net_outstanding_end_cr'])
-            else:
-                st.info("No summary data found.")
-
-        # --- Dropdown below graph, button below dropdown, then subheader, then table ---
-        trend_symbol = st.selectbox(
-            "Show Amount Financed Trend for Symbol",
-            df['Symbol'],
-            format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
-            key="trend_amt_financed"
-        )
-        if st.button("Show Trend", key="trend_btn_amt_financed"):
-            show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
-
-        st.subheader(f"Top {top_n} Stocks by Amount Financed on {to_date_db}")
-
-        st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
-            use_container_width=True
-        )
-
     elif function == "Top by % Change in Amount Financed":
-        if rerun_needed:
-            df = get_top5_amt_financed_pct_change(from_date_db, to_date_db, top_n, selected_industries)
-            st.session_state['results'][key] = df
-            st.session_state['last_range'][function] = current_range
-        df = st.session_state['results'][key]
+        df = get_top5_amt_financed_pct_change(from_date_db, to_date_db, top_n, selected_industries)
         df['Amount Financed Start (₹ Cr)'] = df['Amount Financed Start (₹ Lakhs)'] / 100
         df['Amount Financed End (₹ Cr)'] = df['Amount Financed End (₹ Lakhs)'] / 100
         df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
@@ -215,41 +177,8 @@ if run_analysis:
             'pct_change': '% Change',
             'Exposure %': 'Exposure (%)'
         })
-
-        if st.session_state.get('trend_df') is not None:
-            st.subheader(st.session_state.get('trend_title', 'Amount Financed Trend'))
-            st.line_chart(st.session_state['trend_df'].set_index('date')['amt_financed_cr'])
-        else:
-            st.subheader("Net Outstanding End (Daily Trend) (₹ Cr)")
-            if not df_chart.empty:
-                df_chart['date'] = pd.to_datetime(df_chart['date'])
-                df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100
-                st.line_chart(df_chart.set_index('date')['net_outstanding_end_cr'])
-            else:
-                st.info("No summary data found.")
-
-        trend_symbol = st.selectbox(
-            "Show Amount Financed Trend for Symbol",
-            df['Symbol'],
-            format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
-            key="trend_select_pct"
-        )
-        if st.button("Show Trend", key="trend_btn_pct"):
-            show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
-
-        st.subheader(f"Top {top_n} Stocks by % Change in Amount Financed ({from_date_db} to {to_date_db})")
-
-        st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', '% Change', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
-            use_container_width=True
-        )
-
     elif function == "Newly Added MTF Stocks":
-        if rerun_needed:
-            df = get_newly_added_stocks(from_date_db, to_date_db, top_n, selected_industries)
-            st.session_state['results'][key] = df
-            st.session_state['last_range'][function] = current_range
-        df = st.session_state['results'][key]
+        df = get_newly_added_stocks(from_date_db, to_date_db, top_n, selected_industries)
         df['Amount Financed Start (₹ Cr)'] = df['Amount Financed Start (₹ Lakhs)'] / 100
         df['Amount Financed End (₹ Cr)'] = df['Amount Financed End (₹ Lakhs)'] / 100
         df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
@@ -258,47 +187,70 @@ if run_analysis:
             'name': 'Name',
             'Exposure %': 'Exposure (%)'
         })
-
-        if st.session_state.get('trend_df') is not None:
-            st.subheader(st.session_state.get('trend_title', 'Amount Financed Trend'))
-            st.line_chart(st.session_state['trend_df'].set_index('date')['amt_financed_cr'])
-        else:
-            st.subheader("Net Outstanding End (Daily Trend) (₹ Cr)")
-            if not df_chart.empty:
-                df_chart['date'] = pd.to_datetime(df_chart['date'])
-                df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100
-                st.line_chart(df_chart.set_index('date')['net_outstanding_end_cr'])
-            else:
-                st.info("No summary data found.")
-
-        trend_symbol = st.selectbox(
-            "Show Amount Financed Trend for Symbol",
-            df['Symbol'],
-            format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
-            key="trend_select_new"
-        )
-        if st.button("Show Trend", key="trend_btn_new"):
-            show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
-
-        st.subheader(f"Top {top_n} Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
-
-        st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
-            use_container_width=True
-        )
-
-# --- Show either Net Outstanding or Trend Chart if no analysis run ---
-if not run_analysis:
-    if st.session_state.get('trend_df') is not None:
-        st.subheader(st.session_state.get('trend_title', 'Amount Financed Trend'))
-        st.line_chart(st.session_state['trend_df'].set_index('date')['amt_financed_cr'])
     else:
-        st.subheader("Net Outstanding End (Daily Trend) (₹ Cr)")
-        if not df_chart.empty:
-            df_chart['date'] = pd.to_datetime(df_chart['date'])
-            df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100  # Convert from Lakhs to Cr
-            st.line_chart(df_chart.set_index('date')['net_outstanding_end_cr'])
-        else:
-            st.info("No summary data found.")
+        df = pd.DataFrame()
+    st.session_state['analysis_df'] = df
+    st.session_state['analysis_key'] = key
+else:
+    df = st.session_state['analysis_df']
+
+# --- Graph at the top ---
+if st.session_state.get('trend_df') is not None:
+    st.subheader(st.session_state.get('trend_title', 'Amount Financed Trend'))
+    st.line_chart(st.session_state['trend_df'].set_index('date')['amt_financed_cr'])
+else:
+    st.subheader("Net Outstanding End (Daily Trend) (₹ Cr)")
+    if not df_chart.empty:
+        df_chart['date'] = pd.to_datetime(df_chart['date'])
+        df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100  # Convert from Lakhs to Cr
+        st.line_chart(df_chart.set_index('date')['net_outstanding_end_cr'])
+    else:
+        st.info("No summary data found.")
+
+# --- Dropdown below graph, button below dropdown, then subheader, then table ---
+if function == "Top by Amount Financed":
+    trend_symbol = st.selectbox(
+        "Show Amount Financed Trend for Symbol",
+        df['Symbol'],
+        format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
+        key="trend_amt_financed"
+    )
+    if st.button("Show Trend", key="trend_btn_amt_financed"):
+        show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
+    st.subheader(f"Top {top_n} Stocks by Amount Financed on {to_date_db}")
+    st.dataframe(
+        df[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
+        use_container_width=True
+    )
+
+elif function == "Top by % Change in Amount Financed":
+    trend_symbol = st.selectbox(
+        "Show Amount Financed Trend for Symbol",
+        df['Symbol'],
+        format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
+        key="trend_select_pct"
+    )
+    if st.button("Show Trend", key="trend_btn_pct"):
+        show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
+    st.subheader(f"Top {top_n} Stocks by % Change in Amount Financed ({from_date_db} to {to_date_db})")
+    st.dataframe(
+        df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', '% Change', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
+        use_container_width=True
+    )
+
+elif function == "Newly Added MTF Stocks":
+    trend_symbol = st.selectbox(
+        "Show Amount Financed Trend for Symbol",
+        df['Symbol'],
+        format_func=lambda sym: f"{sym} - {df[df['Symbol'] == sym]['Name'].values[0]}",
+        key="trend_select_new"
+    )
+    if st.button("Show Trend", key="trend_btn_new"):
+        show_trend_for_symbol(trend_symbol, df[df['Symbol'] == trend_symbol]['Name'].values[0])
+    st.subheader(f"Top {top_n} Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
+    st.dataframe(
+        df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
+        use_container_width=True
+    )
 
 st.caption("NSE MTF Analytics Dashboard - Powered by Streamlit")
