@@ -1,16 +1,9 @@
 from datetime import date, datetime, timedelta
-from NSE import NSE
+from nse import NSE
 from pathlib import Path
-import zipfile
-from typing import Union
-import urllib.parse
-import json
-import shutil
 import sqlite3
-import os
 import pandas as pd
 import matplotlib.pyplot as plt
-import requests
 
 DB_PATH = './stock_data.db'
 DATA_DIR = Path('./data')
@@ -133,111 +126,41 @@ def parse_and_insert(csv_path: str, date_str: str):
     except Exception as e:
         print(f"Warning: Could not delete file {csv_path}: {e}")
 
-def unzip(zip_path: Path, extract_to: Path) -> Path:
-    """
-    Unzips the given zip file to the specified directory.
-    Returns the path to the first extracted file.
-    """
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
-        extracted_files = zip_ref.namelist()
-        if extracted_files:
-            return extract_to / extracted_files[0]
-        else:
-            raise FileNotFoundError("No files found in the zip archive.")
-
-def download_document(url: str, folder: Union[str, Path, None] = None) -> Path:
-    """
-    Download the document from the specified URL and return the saved file path.
-    If the downloaded file is a zip file, extracts its contents to the specified folder.
-
-    :param url: URL of the document to download e.g. `https://archives.nseindia.com/annual_reports/AR_ULTRACEMCO_2010_2011_08082011052526.zip`
-    :type url: str
-    :param folder: Folder path to save file. If not specified, uses DATA_DIR.
-    :type folder: pathlib.Path or str or None
-
-    :raise ValueError: If folder is not a directory
-    :raise FileNotFoundError: If download failed or file corrupted
-    :raise RuntimeError: If file extraction fails
-
-    :return: Path to saved file (or extracted file if zip)
-    :rtype: pathlib.Path
-    """
-    # Use the NSE instance's download_document method for robust downloading
-    folder = Path(folder) if folder else DATA_DIR
-    return nse.download_document(url, folder)
-
-def download_nse_report(
-    archives: list,
-    report_date: datetime,
-    report_type: str = "equities",
-    mode: str = "single",
-    folder: Union[str, Path, None] = None
-) -> Path:
-    """
-    Download a report from NSE using the /api/reports endpoint with archives payload.
-    """
-    folder = Path(folder) if folder else Path(".")
-    archives_param = urllib.parse.quote(json.dumps(archives))
-    date_str = report_date.strftime("%d-%b-%Y").replace(
-        report_date.strftime("%b"), report_date.strftime("%b").capitalize()
-    )
-    url = (
-        f"https://www.nseindia.com/api/reports?"
-        f"archives={archives_param}"
-        f"&date={date_str}"
-        f"&type={report_type}"
-        f"&mode={mode}"
-    )
-    print(f"Downloading from: {url}")
-    file = download_document(url=url, folder=folder)
-    if not file.is_file():
-        file.unlink(missing_ok=True)
-        raise FileNotFoundError(f"Failed to download file: {file.name}")
-    return file
-
-def is_date_in_db(date_str: str) -> bool:
-    """Check if data for the given date already exists in stock_data table."""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            "SELECT 1 FROM stock_data WHERE date = ? LIMIT 1", (date_str,)
-        )
-        return cur.fetchone() is not None
-
 def download_and_store_range(from_date: date, to_date: date):
     """
     Download NSE Margin Trading Disclosure report for each date in [from_date, to_date] and store in DB.
+    Only downloads for dates not already present in the DB.
     """
-    archives = [{
-        "name": "CM - Margin Trading Disclosure",
-        "type": "archives",
-        "category": "capital-market",
-        "section": "equities"
-    }]
     create_table()
-    d = from_date
-    while d <= to_date:
+    # Get all dates already present in DB
+    with sqlite3.connect(DB_PATH) as conn:
+        existing_dates = set(
+            row[0] for row in conn.execute("SELECT DISTINCT date FROM stock_data WHERE date BETWEEN ? AND ?", (from_date.strftime('%Y-%m-%d'), to_date.strftime('%Y-%m-%d')))
+        )
+    # Prepare all dates in the range
+    all_dates = [from_date + timedelta(days=i) for i in range((to_date - from_date).days + 1)]
+    missing_dates = [d for d in all_dates if d.strftime('%Y-%m-%d') not in existing_dates]
+    skipped_dates = [d for d in all_dates if d.strftime('%Y-%m-%d') in existing_dates]
+
+    print(f"Skipping {len(skipped_dates)} dates already in DB: {[d.strftime('%Y-%m-%d') for d in skipped_dates]}")
+    print(f"Downloading {len(missing_dates)} dates: {[d.strftime('%Y-%m-%d') for d in missing_dates]}")
+
+    for d in missing_dates:
         date_str = d.strftime('%Y-%m-%d')
-        if is_date_in_db(date_str):
-            print(f"Skipping {d}: already in database.")
-            d += timedelta(days=1)
-            continue
         try:
             print(f"Processing {d}")
-            result = download_nse_report(
-                archives=archives,
-                report_date=datetime(d.year, d.month, d.day),
-                report_type="equities",
-                mode="single",
-                folder=DATA_DIR
-            )
-            csv_path = DATA_DIR / f"mrg_trading_{d.strftime('%d%m%Y')}.csv"
-            shutil.move(str(result), csv_path)
-            parse_and_insert(str(csv_path), date_str)
-            print(f"Loaded {csv_path} into DB for date {d}")
+            url = f"https://nsearchives.nseindia.com/content/equities/mrg_trading_{d.strftime('%d%m%y')}.zip"
+            print(f"Downloading from: {url}")
+            result = nse.download_document(url=url, folder=DATA_DIR)
+            if not result.is_file():
+                result.unlink(missing_ok=True)
+                raise FileNotFoundError(f"Failed to download file: {result.name}")
+
+            # result is already the extracted CSV file
+            parse_and_insert(str(result), date_str)
+            print(f"Loaded {result} into DB for date {d}")
         except Exception as e:
             print(f"Failed for {d}: {e}")
-        d += timedelta(days=1)
 
 def plot_net_outstanding_end():
     """Fetch daily_summary and plot net_outstanding_end for each day."""
@@ -424,7 +347,7 @@ def get_top5_amt_financed_pct_change(from_date: str, to_date: str, top_n: int = 
             ffmc = q.get('marketDeptOrderBook', {}).get('tradeInfo', {}).get('ffmc', None)
             if ffmc is not None:
                 ffmc_lakhs = ffmc * 100
-                exposure_pct = (row['amt_financed_to'] / ffmc_lakhs) * 100 if ffmc_lakhs else None
+                exposure_pct = (row['amt_financed'] / ffmc_lakhs) * 100 if ffmc_lakhs else None
             else:
                 ffmc_lakhs = None
                 exposure_pct = None
@@ -492,12 +415,15 @@ def get_top5_amt_financed_pct_change(from_date: str, to_date: str, top_n: int = 
     df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list if len(df) == len(ffmc_list) else [None] * len(df)
     df['Exposure (%)'] = exposure_pct_list if len(df) == len(exposure_pct_list) else [None] * len(df)
 
+    # Only select columns that exist for pct_change function
     return df.rename(columns={
         'symbol': 'Symbol',
         'name': 'Name',
         'industry': 'Industry',
-        'amt_financed': 'Amount Financed (₹ Lakhs)'
-    })[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Lakhs)', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']]
+        'amt_financed_from': 'Amount Financed Start (₹ Lakhs)',
+        'amt_financed_to': 'Amount Financed End (₹ Lakhs)',
+        'pct_change': '% Change'
+    })[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Lakhs)', 'Amount Financed End (₹ Lakhs)', '% Change', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']]
 
 def get_newly_added_stocks(from_date: str, to_date: str, top_n: int = 5, industries: list = None):
     """
