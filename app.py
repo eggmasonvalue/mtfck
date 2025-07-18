@@ -141,33 +141,36 @@ if run_analysis:
     if rerun_needed or 'analysis_df' not in st.session_state or st.session_state.get('analysis_key') != key:
         if function == "Top by Amount Financed":
             df = get_top5_amt_financed(to_date_db, top_n, selected_industries, from_date_db)
-            df['Amount Financed (₹ Cr)'] = df['Amount Financed (₹ Lakhs)'] / 100
+            df['Amount Financed (₹ Cr)'] = df['amt_financed'] / 100
             df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
             df = df.rename(columns={
                 'symbol': 'Symbol',
                 'name': 'Name',
-                'Exposure %': 'Exposure (%)'
+                'industry': 'Industry',
+                'Exposure (%)': 'Exposure (%)'
             })
         elif function == "Top by % Change in Amount Financed":
             df = get_top5_amt_financed_pct_change(from_date_db, to_date_db, top_n, selected_industries)
-            df['Amount Financed Start (₹ Cr)'] = df['Amount Financed Start (₹ Lakhs)'] / 100
-            df['Amount Financed End (₹ Cr)'] = df['Amount Financed End (₹ Lakhs)'] / 100
+            df['Amount Financed Start (₹ Cr)'] = df['amt_financed_from'] / 100
+            df['Amount Financed End (₹ Cr)'] = df['amt_financed_to'] / 100
             df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
             df = df.rename(columns={
                 'symbol': 'Symbol',
                 'name': 'Name',
+                'industry': 'Industry',
                 'pct_change': '% Change',
-                'Exposure %': 'Exposure (%)'
+                'Exposure (%)': 'Exposure (%)'
             })
         elif function == "Newly Added MTF Stocks":
-            df = get_newly_added_stocks(from_date_db, to_date_db, top_n, selected_industries)
-            df['Amount Financed Start (₹ Cr)'] = df['Amount Financed Start (₹ Lakhs)'] / 100
-            df['Amount Financed End (₹ Cr)'] = df['Amount Financed End (₹ Lakhs)'] / 100
+            df = get_newly_added_stocks(from_date_db, to_date_db, selected_industries)
+            df['Amount Financed Start (₹ Cr)'] = df['amt_financed_from'] / 100
+            df['Amount Financed End (₹ Cr)'] = df['amt_financed_to'] / 100
             df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
             df = df.rename(columns={
                 'symbol': 'Symbol',
                 'name': 'Name',
-                'Exposure %': 'Exposure (%)'
+                'industry': 'Industry',
+                'Exposure (%)': 'Exposure (%)'
             })
         else:
             df = pd.DataFrame()
@@ -192,7 +195,7 @@ if run_analysis:
         )
 
     elif function == "Newly Added MTF Stocks":
-        st.subheader(f"Top {top_n} Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
+        st.subheader(f"Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
         st.dataframe(
             df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']],
             use_container_width=True

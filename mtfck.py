@@ -132,17 +132,22 @@ def download_and_store_range(from_date: date, to_date: date):
     Only downloads for dates not already present in the DB.
     """
     create_table()
-    # Get all dates already present in DB
+    # Get min and max dates present in DB
     with sqlite3.connect(DB_PATH) as conn:
-        existing_dates = set(
-            row[0] for row in conn.execute("SELECT DISTINCT date FROM stock_data WHERE date BETWEEN ? AND ?", (from_date.strftime('%Y-%m-%d'), to_date.strftime('%Y-%m-%d')))
-        )
+        cur = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data")
+        row = cur.fetchone()
+        min_db_date = pd.to_datetime(row[0]).date() if row and row[0] else None
+        max_db_date = pd.to_datetime(row[1]).date() if row and row[1] else None
+
     # Prepare all dates in the range
     all_dates = [from_date + timedelta(days=i) for i in range((to_date - from_date).days + 1)]
-    missing_dates = [d for d in all_dates if d.strftime('%Y-%m-%d') not in existing_dates]
-    skipped_dates = [d for d in all_dates if d.strftime('%Y-%m-%d') in existing_dates]
+    missing_dates = []
+    for d in all_dates:
+        if (min_db_date is None or d < min_db_date) or (max_db_date is None or d > max_db_date):
+            missing_dates.append(d)
+    skipped_dates = [d for d in all_dates if d not in missing_dates]
 
-    print(f"Skipping {len(skipped_dates)} dates already in DB: {[d.strftime('%Y-%m-%d') for d in skipped_dates]}")
+    print(f"Skipping {len(skipped_dates)} dates already in DB")
     print(f"Downloading {len(missing_dates)} dates: {[d.strftime('%Y-%m-%d') for d in missing_dates]}")
 
     for d in missing_dates:
@@ -181,6 +186,38 @@ def plot_net_outstanding_end():
     plt.tight_layout()
     plt.show()
 
+""" Note: Price related historical data is not corporate action adjusted."""
+
+def calculate_returns(symbol, to_date, from_date=None):
+    """
+    Calculate p2p, 1yr, and 3yr returns for a symbol.
+    Returns (ptp_return, one_year_return, three_year_cagr)
+    """
+    close_to = get_next_trading_close(symbol, pd.to_datetime(to_date).date())
+    ptp_return = None
+    one_year_return = None
+    three_year_cagr = None
+
+    # Point-to-point return
+    if from_date:
+        close_from = get_next_trading_close(symbol, pd.to_datetime(from_date).date())
+        if close_from is not None and close_to is not None:
+            ptp_return = ((close_to - close_from) / close_from) * 100
+
+    # 1yr Return (%)
+    one_year_date = (pd.to_datetime(to_date) - timedelta(days=365)).date()
+    close_1yr = get_next_trading_close(symbol, one_year_date)
+    if close_1yr is not None and close_to is not None:
+        one_year_return = ((close_to - close_1yr) / close_1yr) * 100
+
+    # 3yr Return (%) (CAGR)
+    three_year_date = (pd.to_datetime(to_date) - timedelta(days=3 * 365)).date()
+    close_3yr = get_next_trading_close(symbol, three_year_date)
+    if close_3yr is not None and close_to is not None:
+        three_year_cagr = (((close_to / close_3yr) ** (1 / 3)) - 1) * 100
+
+    return ptp_return, one_year_return, three_year_cagr
+
 def get_top5_amt_financed(to_date: str, top_n: int = 5, industries: list = None, from_date: str = None):
     """
     Return top N stocks by amt_financed on to_date,
@@ -212,92 +249,30 @@ def get_top5_amt_financed(to_date: str, top_n: int = 5, industries: list = None,
             params = (to_date, top_n)
         df = pd.read_sql_query(query, conn, params=params)
 
-    # Add ffmc, exposure %, and point-to-point return columns
     ffmc_list = []
     exposure_pct_list = []
     ptp_return_list = []
     one_year_return_list = []
     three_year_cagr_list = []
+
     for _, row in df.iterrows():
-        try:
-            q = nse.quote(row['symbol'], section='trade_info')
-            ffmc = q.get('marketDeptOrderBook', {}).get('tradeInfo', {}).get('ffmc', None)
-            if ffmc is not None:
-                ffmc_lakhs = ffmc * 100
-                exposure_pct = (row['amt_financed'] / ffmc_lakhs) * 100 if ffmc_lakhs else None
-            else:
-                ffmc_lakhs = None
-                exposure_pct = None
-        except Exception:
-            ffmc_lakhs = None
-            exposure_pct = None
+        ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, 'amt_financed')
         ffmc_list.append(ffmc_lakhs)
         exposure_pct_list.append(exposure_pct)
 
-        # Point-to-point return calculation
-        ptp_return = None
-        if from_date:
-            try:
-                hist_from = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(from_date).date(), to_date=pd.to_datetime(from_date).date())
-                hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-                close_from = hist_from[0]['CH_CLOSING_PRICE'] if hist_from else None
-                close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-                try:
-                    close_from = float(close_from) if close_from is not None else None
-                    close_to = float(close_to) if close_to is not None else None
-                except Exception:
-                    close_from = None
-                    close_to = None
-                if close_from is not None and close_to is not None:
-                    ptp_return = ((close_to - close_from) / close_from) * 100
-                else:
-                    print(f"[WARN] {row['symbol']} either changed symbol, listed or delisted within the chosen date range")
-            except Exception as e:
-                print(f"[ERROR] {row['symbol']} error in p2p return: {e}")
-                ptp_return = None
+        ptp_return, one_year_return, three_year_cagr = calculate_returns(row['symbol'], to_date, from_date)
         ptp_return_list.append(ptp_return)
-
-        # Calculate 1yr Return (%)
-        one_year_return = None
-        try:
-            one_year_date = (pd.to_datetime(to_date) - timedelta(days=365)).date()
-            hist_1yr = nse.fetch_equity_historical_data(row['symbol'], from_date=one_year_date, to_date=one_year_date)
-            hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-            close_1yr = hist_1yr[0]['CH_CLOSING_PRICE'] if hist_1yr else None
-            close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-            if close_1yr is not None and close_to is not None:
-                one_year_return = ((close_to - close_1yr) / close_1yr) * 100
-        except Exception as e:
-            print(f"[ERROR] {row['symbol']} error in 1yr return: {e}")
-            one_year_return = None
         one_year_return_list.append(one_year_return)
-
-        # Calculate 3yr Return (%) (CAGR)
-        three_year_cagr = None
-        try:
-            three_year_date = (pd.to_datetime(to_date) - timedelta(days=3 * 365)).date()
-            hist_3yr = nse.fetch_equity_historical_data(row['symbol'], from_date=three_year_date, to_date=three_year_date)
-            close_3yr = hist_3yr[0]['CH_CLOSING_PRICE'] if hist_3yr else None
-            if close_3yr is not None and close_to is not None:
-                three_year_cagr = (((close_to / close_3yr) ** (1 / 3)) - 1) * 100
-        except Exception as e:
-            print(f"[ERROR] {row['symbol']} error in 3yr CAGR: {e}")
-            three_year_cagr = None
         three_year_cagr_list.append(three_year_cagr)
 
-    # Ensure the columns are added to the DataFrame
-    df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list if len(df) == len(ffmc_list) else [None] * len(df)
-    df['Exposure (%)'] = exposure_pct_list if len(df) == len(exposure_pct_list) else [None] * len(df)
-    df['Point-to-Point Return (%)'] = ptp_return_list if len(df) == len(ptp_return_list) else [None] * len(df)
-    df['1yr Return (%)'] = one_year_return_list if len(df) == len(one_year_return_list) else [None] * len(df)
-    df['3yr Return (%) (CAGR)'] = three_year_cagr_list if len(df) == len(three_year_cagr_list) else [None] * len(df)
+    df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list
+    df['Exposure (%)'] = exposure_pct_list
+    df['Point-to-Point Return (%)'] = ptp_return_list
+    df['1yr Return (%)'] = one_year_return_list
+    df['3yr Return (%) (CAGR)'] = three_year_cagr_list
 
-    return df.rename(columns={
-        'symbol': 'Symbol',
-        'name': 'Name',
-        'industry': 'Industry',
-        'amt_financed': 'Amount Financed (₹ Lakhs)'
-    })[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Lakhs)', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']]
+    # Return the full DataFrame with all columns
+    return df
 
 def get_top5_amt_financed_pct_change(from_date: str, to_date: str, top_n: int = 5, industries: list = None):
     """
@@ -342,92 +317,29 @@ def get_top5_amt_financed_pct_change(from_date: str, to_date: str, top_n: int = 
     one_year_return_list = []
     three_year_cagr_list = []
     for _, row in df.iterrows():
-        try:
-            q = nse.quote(row['symbol'], section='trade_info')
-            ffmc = q.get('marketDeptOrderBook', {}).get('tradeInfo', {}).get('ffmc', None)
-            if ffmc is not None:
-                ffmc_lakhs = ffmc * 100
-                exposure_pct = (row['amt_financed'] / ffmc_lakhs) * 100 if ffmc_lakhs else None
-            else:
-                ffmc_lakhs = None
-                exposure_pct = None
-        except Exception:
-            ffmc_lakhs = None
-            exposure_pct = None
+        # Use amt_financed_to for ffmc/exposure
+        ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, 'amt_financed_to')
         ffmc_list.append(ffmc_lakhs)
         exposure_pct_list.append(exposure_pct)
 
-        # Point-to-point return calculation
-        ptp_return = None
-        try:
-            hist_from = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(from_date).date(), to_date=pd.to_datetime(from_date).date())
-            hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-            close_from = hist_from[0]['CH_CLOSING_PRICE'] if hist_from else None
-            close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-            try:
-                close_from = float(close_from) if close_from is not None else None
-                close_to = float(close_to) if close_to is not None else None
-            except Exception:
-                close_from = None
-                close_to = None
-            if close_from is not None and close_to is not None:
-                ptp_return = ((close_to - close_from) / close_from) * 100
-            else:
-                print(f"[WARN] {row['symbol']} either changed symbol, listed or delisted within the chosen date range")
-        except Exception as e:
-            print(f"[ERROR] {row['symbol']} error in p2p return: {e}")
-            ptp_return = None
+        # Use symbol and to_date for returns
+        ptp_return, one_year_return, three_year_cagr = calculate_returns(row['symbol'], to_date, from_date)
         ptp_return_list.append(ptp_return)
-
-        # Calculate 1yr Return (%)
-        one_year_return = None
-        try:
-            one_year_date = (pd.to_datetime(to_date) - timedelta(days=365)).date()
-            hist_1yr = nse.fetch_equity_historical_data(row['symbol'], from_date=one_year_date, to_date=one_year_date)
-            hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-            close_1yr = hist_1yr[0]['CH_CLOSING_PRICE'] if hist_1yr else None
-            close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-            if close_1yr is not None and close_to is not None:
-                one_year_return = ((close_to - close_1yr) / close_1yr) * 100
-        except Exception as e:
-            print(f"[ERROR] {row['symbol']} error in 1yr return: {e}")
-            one_year_return = None
         one_year_return_list.append(one_year_return)
-
-        # Calculate 3yr Return (%) (CAGR)
-        three_year_cagr = None
-        try:
-            three_year_date = (pd.to_datetime(to_date) - timedelta(days=3 * 365)).date()
-            hist_3yr = nse.fetch_equity_historical_data(row['symbol'], from_date=three_year_date, to_date=three_year_date)
-            close_3yr = hist_3yr[0]['CH_CLOSING_PRICE'] if hist_3yr else None
-            if close_3yr is not None and close_to is not None:
-                three_year_cagr = (((close_to / close_3yr) ** (1 / 3)) - 1) * 100
-        except Exception as e:
-            print(f"[ERROR] {row['symbol']} error in 3yr CAGR: {e}")
-            three_year_cagr = None
         three_year_cagr_list.append(three_year_cagr)
 
-    # Add new columns to the DataFrame
-    df['1yr Return (%)'] = one_year_return_list if len(df) == len(one_year_return_list) else [None] * len(df)
-    df['3yr Return (%) (CAGR)'] = three_year_cagr_list if len(df) == len(three_year_cagr_list) else [None] * len(df)
-    df['Point-to-Point Return (%)'] = ptp_return_list if len(df) == len(ptp_return_list) else [None] * len(df)
-    # Ensure the columns are added to the DataFrame
-    df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list if len(df) == len(ffmc_list) else [None] * len(df)
-    df['Exposure (%)'] = exposure_pct_list if len(df) == len(exposure_pct_list) else [None] * len(df)
+    df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list
+    df['Exposure (%)'] = exposure_pct_list
+    df['Point-to-Point Return (%)'] = ptp_return_list
+    df['1yr Return (%)'] = one_year_return_list
+    df['3yr Return (%) (CAGR)'] = three_year_cagr_list
 
-    # Only select columns that exist for pct_change function
-    return df.rename(columns={
-        'symbol': 'Symbol',
-        'name': 'Name',
-        'industry': 'Industry',
-        'amt_financed_from': 'Amount Financed Start (₹ Lakhs)',
-        'amt_financed_to': 'Amount Financed End (₹ Lakhs)',
-        'pct_change': '% Change'
-    })[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Lakhs)', 'Amount Financed End (₹ Lakhs)', '% Change', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']]
+    # Return the full DataFrame with all columns
+    return df
 
-def get_newly_added_stocks(from_date: str, to_date: str, top_n: int = 5, industries: list = None):
+def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None):
     """
-    Return top N stocks that are newly added in MTF from from_date to to_date.
+    Return all stocks that are newly added in MTF from from_date to to_date.
     Optionally filter by industries.
     Adds point-to-point return (%) for the date range.
     """
@@ -467,86 +379,24 @@ def get_newly_added_stocks(from_date: str, to_date: str, top_n: int = 5, industr
         ptp_return_list = []
         one_year_return_list = []
         three_year_cagr_list = []
-        for _, row in df_new.iterrows():
-            try:
-                q = nse.quote(row['symbol'], section='trade_info')
-                ffmc = q.get('marketDeptOrderBook', {}).get('tradeInfo', {}).get('ffmc', None)
-                if ffmc is not None:
-                    ffmc_lakhs = ffmc * 100
-                    exposure_pct = (row['amt_financed_to'] / ffmc_lakhs) * 100 if ffmc_lakhs else None
-                else:
-                    ffmc_lakhs = None
-                    exposure_pct = None
-            except Exception:
-                ffmc_lakhs = None
-                exposure_pct = None
+        for idx, row in df_new.iterrows():
+            print(f"Processing newly added symbol: {row['symbol']} ({row['name']})")
+            ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, 'amt_financed_to')
             ffmc_list.append(ffmc_lakhs)
             exposure_pct_list.append(exposure_pct)
 
-            # Point-to-point return calculation
-            ptp_return = None
-            try:
-                hist_from = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(from_date).date(), to_date=pd.to_datetime(from_date).date())
-                hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-                close_from = hist_from[0]['CH_CLOSING_PRICE'] if hist_from else None
-                close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-                try:
-                    close_from = float(close_from) if close_from is not None else None
-                    close_to = float(close_to) if close_to is not None else None
-                except Exception:
-                    close_from = None
-                    close_to = None
-                if close_from is not None and close_to is not None:
-                    ptp_return = ((close_to - close_from) / close_from) * 100
-                else:
-                    print(f"[WARN] {row['symbol']} either changed symbol, listed or delisted within the chosen date range")
-            except Exception as e:
-                print(f"[ERROR] {row['symbol']} error in p2p return: {e}")
-                ptp_return = None
+            ptp_return, one_year_return, three_year_cagr = calculate_returns(row['symbol'], to_date, from_date)
             ptp_return_list.append(ptp_return)
-
-            # Calculate 1yr Return (%)
-            one_year_return = None
-            try:
-                one_year_date = (pd.to_datetime(to_date) - timedelta(days=365)).date()
-                hist_1yr = nse.fetch_equity_historical_data(row['symbol'], from_date=one_year_date, to_date=one_year_date)
-                hist_to = nse.fetch_equity_historical_data(row['symbol'], from_date=pd.to_datetime(to_date).date(), to_date=pd.to_datetime(to_date).date())
-                close_1yr = hist_1yr[0]['CH_CLOSING_PRICE'] if hist_1yr else None
-                close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-                if close_1yr is not None and close_to is not None:
-                    one_year_return = ((close_to - close_1yr) / close_1yr) * 100
-            except Exception as e:
-                print(f"[ERROR] {row['symbol']} error in 1yr return: {e}")
-                one_year_return = None
             one_year_return_list.append(one_year_return)
-
-            # Calculate 3yr Return (%) (CAGR)
-            three_year_cagr = None
-            try:
-                three_year_date = (pd.to_datetime(to_date) - timedelta(days=3 * 365)).date()
-                hist_3yr = nse.fetch_equity_historical_data(row['symbol'], from_date=three_year_date, to_date=three_year_date)
-                close_3yr = hist_3yr[0]['CH_CLOSING_PRICE'] if hist_3yr else None
-                if close_3yr is not None and close_to is not None:
-                    three_year_cagr = (((close_to / close_3yr) ** (1 / 3)) - 1) * 100
-            except Exception as e:
-                print(f"[ERROR] {row['symbol']} error in 3yr CAGR: {e}")
-                three_year_cagr = None
             three_year_cagr_list.append(three_year_cagr)
-
         # Assign columns before sorting and selecting columns
         df_new['Free Float Market Cap (₹ Lakhs)'] = ffmc_list if len(df_new) == len(ffmc_list) else [None] * len(df_new)
         df_new['Exposure (%)'] = exposure_pct_list if len(df_new) == len(exposure_pct_list) else [None] * len(df_new)
         df_new['Point-to-Point Return (%)'] = ptp_return_list if len(df_new) == len(ptp_return_list) else [None] * len(df_new)
         df_new['1yr Return (%)'] = one_year_return_list if len(df_new) == len(one_year_return_list) else [None] * len(df_new)
         df_new['3yr Return (%) (CAGR)'] = three_year_cagr_list if len(df_new) == len(three_year_cagr_list) else [None] * len(df_new)
-        df_new = df_new.sort_values('amt_financed_to', ascending=False).head(top_n)
-        return df_new.rename(columns={
-            'symbol': 'Symbol',
-            'name': 'Name',
-            'industry': 'Industry',
-            'amt_financed_from': 'Amount Financed Start (₹ Lakhs)',
-            'amt_financed_to': 'Amount Financed End (₹ Lakhs)'
-        })[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Lakhs)', 'Amount Financed End (₹ Lakhs)', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']]
+        # Do not sort or filter by top_n, return all
+        return df_new
 
 __all__ = [
     "DB_PATH",
@@ -581,50 +431,32 @@ def get_prev_available_date(target_date):
             return row[0]
     return None
 
+def get_next_trading_close(symbol, target_date):
+    """Return closing price for the next available trading day >= target_date."""
+    max_tries = 15
+    for i in range(max_tries):
+        d = target_date + timedelta(days=i)
+        hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
+        if hist and 'CH_CLOSING_PRICE' in hist[0]:
+            try:
+                return float(hist[0]['CH_CLOSING_PRICE'])
+            except Exception:
+                continue
+    return None
+
+def get_ffmc_and_exposure(row, amt_field):
+    """
+    Returns (ffmc_lakhs, exposure_pct) for a given row and amount field.
+    """
+    try:
+        q = nse.quote(row['symbol'], section='trade_info')
+        ffmc = q.get('marketDeptOrderBook', {}).get('tradeInfo', {}).get('ffmc', None)
+        ffmc_lakhs = ffmc * 100 if ffmc is not None else None
+        exposure_pct = (row[amt_field] / ffmc_lakhs) * 100 if ffmc_lakhs else None
+    except Exception:
+        ffmc_lakhs = None
+        exposure_pct = None
+    return ffmc_lakhs, exposure_pct
+
 if __name__ == "__main__":
-    # import sys
-
-    # def parse_date(s):
-    #     # Accepts YYYY-MM-DD or DD-MM-YYYY
-    #     for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
-    #         try:
-    #             return datetime.strptime(s, fmt).date()
-    #         except ValueError:
-    #             continue
-    #     raise ValueError(f"Invalid date format: {s}")
-
-    # if len(sys.argv) == 3:
-    #     from_date = parse_date(sys.argv[1])
-    #     to_date = parse_date(sys.argv[2])
-
-    #     # Adjusted logic: from_date = next available, to_date = previous available
-    #     from_date_db = get_next_available_date(from_date)
-    #     to_date_db = get_prev_available_date(to_date)
-
-    #     if not from_date_db:
-    #         print(f"No data available in DB for {from_date} or any later date.")
-    #         sys.exit(1)
-    #     if not to_date_db:
-    #         print(f"No data available in DB for {to_date} or any earlier date.")
-    #         sys.exit(1)
-
-    #     print(f"Using from_date: {from_date_db}, to_date: {to_date_db} (nearest available in DB)")
-
-    #     # download_and_store_range(from_date, to_date)  # Optionally keep this if you want to fetch new data
-    #     # plot_net_outstanding_end()
-    #     print("\nTop 5 stocks by amt_financed on", to_date_db)
-    #     print(get_top5_amt_financed(to_date_db))
-    #     # print("\nTop 5 stocks by % change in amt_financed between", from_date_db, "and", to_date_db)
-    #     # print(get_top5_amt_financed_pct_change(from_date_db, to_date_db))
-    #     # print("\nStocks newly added in MTF from", from_date_db, "to", to_date_db)
-    #     # print(get_newly_added_stocks(from_date_db, to_date_db))
-    #     print("\nTop 5 stocks by exposure % on", to_date_db)
-    #     print(get_top5_exposure_pct(to_date_db))
-    # else:
-    #     # plot_net_outstanding_end()
-    #     print("Usage: python mtfck.py FROM_DATE TO_DATE")
-    #     print("Example: python mtfck.py 2025-06-04 2025-06-11")
-    #     sys.exit(1)
-
-    equityIndustryInfo = nse.equityMetaInfo(symbol='RELIANCE')
-    print("Industry Info for RELIANCE:", equityIndustryInfo)
+   pass
