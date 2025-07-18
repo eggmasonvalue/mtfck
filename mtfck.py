@@ -132,20 +132,15 @@ def download_and_store_range(from_date: date, to_date: date):
     Only downloads for dates not already present in the DB.
     """
     create_table()
-    # Get min and max dates present in DB
+    # Get all dates present in DB
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data")
-        row = cur.fetchone()
-        min_db_date = pd.to_datetime(row[0]).date() if row and row[0] else None
-        max_db_date = pd.to_datetime(row[1]).date() if row and row[1] else None
+        cur = conn.execute("SELECT DISTINCT date FROM stock_data")
+        db_dates = set(pd.to_datetime([row[0] for row in cur.fetchall()]).date)
 
     # Prepare all dates in the range
     all_dates = [from_date + timedelta(days=i) for i in range((to_date - from_date).days + 1)]
-    missing_dates = []
-    for d in all_dates:
-        if (min_db_date is None or d < min_db_date) or (max_db_date is None or d > max_db_date):
-            missing_dates.append(d)
-    skipped_dates = [d for d in all_dates if d not in missing_dates]
+    missing_dates = [d for d in all_dates if d not in db_dates]
+    skipped_dates = [d for d in all_dates if d in db_dates]
 
     print(f"Skipping {len(skipped_dates)} dates already in DB")
     print(f"Downloading {len(missing_dates)} dates: {[d.strftime('%Y-%m-%d') for d in missing_dates]}")
@@ -479,12 +474,17 @@ def get_next_trading_close(symbol, target_date):
     max_tries = 15
     for i in range(max_tries):
         d = target_date + timedelta(days=i)
-        hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
-        if hist and 'CH_CLOSING_PRICE' in hist[0]:
-            try:
-                return float(hist[0]['CH_CLOSING_PRICE'])
-            except Exception:
-                continue
+        try:
+            # Fetch historical data for the symbol
+            hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
+            if hist and 'CH_CLOSING_PRICE' in hist[0]:
+                try:
+                    return float(hist[0]['CH_CLOSING_PRICE'])
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Error fetching next trading close for {symbol} on {d}: {e}")
+            return None
     return None
 
 def get_ffmc_and_exposure(row, amt_field):
