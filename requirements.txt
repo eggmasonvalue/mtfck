@@ -1,4 +1,5 @@
+nse
 pandas
-matplotlib
+plotly
 streamlit
 requests
