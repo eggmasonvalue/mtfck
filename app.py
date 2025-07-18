@@ -12,7 +12,8 @@ from mtfck import (
     get_newly_added_stocks,
     create_table,
     nse,  # Import the nse instance
-    calculate_returns  # <-- Add this line
+    calculate_returns,  
+    get_ffmc_and_exposure  
 )
 import plotly.graph_objects as go
 
@@ -36,7 +37,14 @@ def get_unique_industries():
         return []
 
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
-st.title("NSE Margin Trading Facility (MTF) Analytics Dashboard")
+st.markdown(
+    """
+    <h1 style='text-align: center; font-family: "Impact"; font-size: 3em; font-weight: bold; color: orange; margin-bottom: 0.5em; letter-spacing: 0.05em;'>
+        MTFCK!
+    </h1>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- Sidebar Controls ---
 with st.sidebar:
@@ -69,12 +77,6 @@ with st.sidebar:
     trend_symbol_input = st.text_input("Enter Symbol for Amount Financed Trend", key="trend_symbol_input").upper()
     show_trend_clicked = st.button("Show Amount Financed Trend", key="trend_btn_sidebar")
     show_net_outstanding_clicked = st.button("Show Total Outstanding Trend", key="net_outstanding_btn_sidebar")
-
-    # --- Track trend chart display intent ---
-    if show_trend_clicked:
-        st.session_state['show_trend'] = True
-    if show_net_outstanding_clicked:
-        st.session_state['show_net_outstanding'] = True
 
 st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 
@@ -209,33 +211,40 @@ if run_analysis:
         )
 
 # --- Trend Analysis Display ---
-if st.session_state.get("show_trend", False) or st.session_state.get("show_price_return", False):
+if show_trend_clicked:
     trend_df = get_amt_financed_trend(trend_symbol_input, from_date_db, to_date_db)
     if not trend_df.empty:
-        # Use calculate_returns directly
         ptp_return, one_year_return, three_year_cagr = None, None, None
+        ffmc_lakhs, exposure_pct = None, None
         try:
             ptp_return, one_year_return, three_year_cagr = calculate_returns(
                 trend_symbol_input, to_date_db, from_date_db
             )
+            # Use last available row for ffmc/exposure
+            if not trend_df.empty:
+                amt_field = 'amt_financed'
+                last_row = trend_df.iloc[-1]
+                ffmc_lakhs, exposure_pct = get_ffmc_and_exposure({'symbol': trend_symbol_input, amt_field: last_row[amt_field]}, amt_field)
         except Exception:
             ptp_return, one_year_return, three_year_cagr = None, None, None
+            ffmc_lakhs, exposure_pct = None, None
 
-        # Display Symbol, P2P, 1yr, and 3yr Return (CAGR) in equal-width columns
-        col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(f"<b>Symbol:</b> {trend_symbol_input}", unsafe_allow_html=True)
-        col2.markdown(f"<b>P2P Return:</b> {ptp_return:.2f}%" if ptp_return is not None else "<b>P2P Return:</b> N/A", unsafe_allow_html=True)
-        col3.markdown(f"<b>1yr Return:</b> {one_year_return:.2f}%" if one_year_return is not None else "<b>1yr Return:</b> N/A", unsafe_allow_html=True)
-        col4.markdown(f"<b>3yr Return (CAGR):</b> {three_year_cagr:.2f}%" if three_year_cagr is not None else "<b>3yr Return (CAGR):</b> N/A", unsafe_allow_html=True)
+        # Convert lakhs to crores for display
+        ffmc_cr = ffmc_lakhs / 100 if ffmc_lakhs is not None else None
 
-        # Checkbox to show price return, rerun if toggled
-        show_price_return = st.checkbox("Show price return during the period", key="show_price_return")
-        if show_price_return != st.session_state.get("_last_show_price_return", None):
-            st.session_state["_last_show_price_return"] = show_price_return
-            st.rerun()
+        st.markdown(
+            f"<div style='font-weight:bold;font-size:1.5em'>{trend_symbol_input}</div>",
+            unsafe_allow_html=True
+        )
 
-        # Prepare Plotly figure
-        trend_df['pct_change'] = trend_df['amt_financed_cr'].pct_change() * 100  # Calculate % change
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.markdown(f"<b>Free Float Market Cap:</b><br>{ffmc_cr:.2f} Cr" if ffmc_cr is not None else "<b>Free Float Market Cap:</b><br>N/A", unsafe_allow_html=True)
+        col2.markdown(f"<b>Exposure (%):</b><br>{exposure_pct:.2f}%" if exposure_pct is not None else "<b>Exposure (%):</b><br>N/A", unsafe_allow_html=True)
+        col3.markdown(f"<b>P2P Return:</b><br>{ptp_return:.2f}%" if ptp_return is not None else "<b>P2P Return:</b><br>N/A", unsafe_allow_html=True)
+        col4.markdown(f"<b>1yr Return:</b><br>{one_year_return:.2f}%" if one_year_return is not None else "<b>1yr Return:</b><br>N/A", unsafe_allow_html=True)
+        col5.markdown(f"<b>3yr CAGR:</b><br>{three_year_cagr:.2f}%" if three_year_cagr is not None else "<b>3yr CAGR:</b><br>N/A", unsafe_allow_html=True)
+
+        trend_df['pct_change'] = trend_df['amt_financed_cr'].pct_change() * 100
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=trend_df['date'],
@@ -247,37 +256,35 @@ if st.session_state.get("show_trend", False) or st.session_state.get("show_price
             customdata=trend_df['pct_change']
         ))
 
-        # If checkbox is checked, fetch and plot price data
-        if show_price_return:
-            price_data = nse.fetch_equity_historical_data(
-                trend_symbol_input,
-                from_date=pd.to_datetime(from_date_db).date(),
-                to_date=pd.to_datetime(to_date_db).date()
-            )
-            if price_data:
-                price_df = pd.DataFrame(price_data)
-                price_df['date'] = pd.to_datetime(price_df['mTIMESTAMP'])
-                price_df = price_df.sort_values('date')
-                price_df['pct_change'] = price_df['CH_CLOSING_PRICE'].pct_change() * 100  # Calculate % change for price
-                fig.add_trace(go.Scatter(
-                    x=price_df['date'],
-                    y=price_df['CH_CLOSING_PRICE'],
-                    mode='lines+markers',
-                    name='Closing Price',
-                    line=dict(color='orange', width=2, dash='dot'),
-                    yaxis='y2',
-                    hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                    customdata=price_df['pct_change']  # Pass % change as custom data
-                ))
-                # Add secondary y-axis for price
-                fig.update_layout(
-                    yaxis2=dict(
-                        title="Closing Price (₹)",
-                        overlaying='y',
-                        side='right',
-                        showgrid=False
-                    )
+        # Always show price overlay when button is clicked
+        price_data = nse.fetch_equity_historical_data(
+            trend_symbol_input,
+            from_date=pd.to_datetime(from_date_db).date(),
+            to_date=pd.to_datetime(to_date_db).date()
+        )
+        if price_data:
+            price_df = pd.DataFrame(price_data)
+            price_df['date'] = pd.to_datetime(price_df['mTIMESTAMP'])
+            price_df = price_df.sort_values('date')
+            price_df['pct_change'] = price_df['CH_CLOSING_PRICE'].pct_change() * 100
+            fig.add_trace(go.Scatter(
+                x=price_df['date'],
+                y=price_df['CH_CLOSING_PRICE'],
+                mode='lines+markers',
+                name='Closing Price',
+                line=dict(color='orange', width=2, dash='dot'),
+                yaxis='y2',
+                hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                customdata=price_df['pct_change']
+            ))
+            fig.update_layout(
+                yaxis2=dict(
+                    title="Closing Price (₹)",
+                    overlaying='y',
+                    side='right',
+                    showgrid=False
                 )
+            )
 
         fig.update_layout(
             title=f"Amount Financed Trend for {trend_symbol_input}",
@@ -287,28 +294,22 @@ if st.session_state.get("show_trend", False) or st.session_state.get("show_price
             yaxis_range=[trend_df['amt_financed_cr'].min(), trend_df['amt_financed_cr'].max()],
             width=800,
             height=400,
-            hovermode='x unified'  # <-- Add this line for unified hover and vertical cursor
+            hovermode='x unified'
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.subheader(f"No trend data available for {trend_symbol_input} in the selected range.")
 
 # --- Net Outstanding Trend Display ---
-if st.session_state.get("show_net_outstanding", False) or st.session_state.get("show_index_trend", False):
+if show_net_outstanding_clicked:
     with sqlite3.connect(DB_PATH) as conn:
         df_chart = pd.read_sql_query(
             "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date", conn
         )
     if not df_chart.empty:
         df_chart['date'] = pd.to_datetime(df_chart['date'])
-        df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100  # Convert from Lakhs to Cr
-        df_chart['pct_change'] = df_chart['net_outstanding_end_cr'].pct_change() * 100  # Calculate % change
-
-        # Persist index trend checkbox state and rerun if toggled
-        show_index_trend = st.checkbox("Show NIFTY TOTAL MARKET Index Trend", key="show_index_trend")
-        if show_index_trend != st.session_state.get("_last_show_index_trend", None):
-            st.session_state["_last_show_index_trend"] = show_index_trend
-            st.rerun()
+        df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100
+        df_chart['pct_change'] = df_chart['net_outstanding_end_cr'].pct_change() * 100
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -321,38 +322,36 @@ if st.session_state.get("show_net_outstanding", False) or st.session_state.get("
             customdata=df_chart['pct_change']
         ))
 
-        # If checkbox checked, plot index data as secondary y-axis
-        if show_index_trend:
-            index_data = nse.fetch_historical_index_data(
-                index="NIFTY TOTAL MARKET",
-                from_date=pd.to_datetime(df_chart['date'].min()).date(),
-                to_date=pd.to_datetime(df_chart['date'].max()).date()
-            )
-            price_list = index_data.get("price", [])
-            price_df = pd.DataFrame(price_list)
-            # Use EOD_CLOSE_INDEX_VAL for plotting, EOD_TIMESTAMP for date
-            if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
-                price_df['date'] = pd.to_datetime(price_df['EOD_TIMESTAMP'], format="%d-%b-%Y", errors='coerce')
-                price_df = price_df.sort_values('date')
-                price_df['pct_change'] = price_df['EOD_CLOSE_INDEX_VAL'].pct_change() * 100
-                fig.add_trace(go.Scatter(
-                    x=price_df['date'],
-                    y=price_df['EOD_CLOSE_INDEX_VAL'],
-                    mode='lines+markers',
-                    name='NIFTY TOTAL MARKET',
-                    line=dict(color='blue', width=2, dash='dot'),
-                    yaxis='y2',
-                    hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                    customdata=price_df['pct_change']
-                ))
-                fig.update_layout(
-                    yaxis2=dict(
-                        title="NIFTY TOTAL MARKET Close",
-                        overlaying='y',
-                        side='right',
-                        showgrid=False
-                    )
+        # Always show index overlay when button is clicked
+        index_data = nse.fetch_historical_index_data(
+            index="NIFTY TOTAL MARKET",
+            from_date=pd.to_datetime(df_chart['date'].min()).date(),
+            to_date=pd.to_datetime(df_chart['date'].max()).date()
+        )
+        price_list = index_data.get("price", [])
+        price_df = pd.DataFrame(price_list)
+        if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
+            price_df['date'] = pd.to_datetime(price_df['EOD_TIMESTAMP'], format="%d-%b-%Y", errors='coerce')
+            price_df = price_df.sort_values('date')
+            price_df['pct_change'] = price_df['EOD_CLOSE_INDEX_VAL'].pct_change() * 100
+            fig.add_trace(go.Scatter(
+                x=price_df['date'],
+                y=price_df['EOD_CLOSE_INDEX_VAL'],
+                mode='lines+markers',
+                name='NIFTY TOTAL MARKET',
+                line=dict(color='blue', width=2, dash='dot'),
+                yaxis='y2',
+                hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                customdata=price_df['pct_change']
+            ))
+            fig.update_layout(
+                yaxis2=dict(
+                    title="NIFTY TOTAL MARKET Close",
+                    overlaying='y',
+                    side='right',
+                    showgrid=False
                 )
+            )
 
         fig.update_layout(
             title="Net Outstanding End (Daily Trend)",
