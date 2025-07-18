@@ -11,7 +11,8 @@ from mtfck import (
     get_top5_amt_financed_pct_change,
     get_newly_added_stocks,
     create_table,
-    nse  # Import the nse instance
+    nse,  # Import the nse instance
+    calculate_returns  # <-- Add this line
 )
 import plotly.graph_objects as go
 
@@ -65,9 +66,15 @@ with st.sidebar:
     
     # --- Trends Section ---
     st.header("Trends")
-    trend_symbol_input = st.text_input("Enter Symbol for Amount Financed Trend", key="trend_symbol_input").upper()  # Convert to uppercase
+    trend_symbol_input = st.text_input("Enter Symbol for Amount Financed Trend", key="trend_symbol_input").upper()
     show_trend_clicked = st.button("Show Amount Financed Trend", key="trend_btn_sidebar")
     show_net_outstanding_clicked = st.button("Show Total Outstanding Trend", key="net_outstanding_btn_sidebar")
+
+    # --- Track trend chart display intent ---
+    if show_trend_clicked:
+        st.session_state['show_trend'] = True
+    if show_net_outstanding_clicked:
+        st.session_state['show_net_outstanding'] = True
 
 st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 
@@ -202,51 +209,76 @@ if run_analysis:
         )
 
 # --- Trend Analysis Display ---
-if show_trend_clicked:
+if st.session_state.get("show_trend", False) or st.session_state.get("show_price_return", False):
     trend_df = get_amt_financed_trend(trend_symbol_input, from_date_db, to_date_db)
     if not trend_df.empty:
-        # Calculate 1yr Return (%)
-        one_year_return = None
+        # Use calculate_returns directly
+        ptp_return, one_year_return, three_year_cagr = None, None, None
         try:
-            one_year_date = (pd.to_datetime(to_date_db) - timedelta(days=365)).date()
-            hist_1yr = nse.fetch_equity_historical_data(trend_symbol_input, from_date=one_year_date, to_date=one_year_date)
-            hist_to = nse.fetch_equity_historical_data(trend_symbol_input, from_date=pd.to_datetime(to_date_db).date(), to_date=pd.to_datetime(to_date_db).date())
-            close_1yr = hist_1yr[0]['CH_CLOSING_PRICE'] if hist_1yr else None
-            close_to = hist_to[0]['CH_CLOSING_PRICE'] if hist_to else None
-            if close_1yr is not None and close_to is not None:
-                one_year_return = ((close_to - close_1yr) / close_1yr) * 100
+            ptp_return, one_year_return, three_year_cagr = calculate_returns(
+                trend_symbol_input, to_date_db, from_date_db
+            )
         except Exception:
-            one_year_return = None
+            ptp_return, one_year_return, three_year_cagr = None, None, None
 
-        # Calculate 3yr Return (%) (CAGR)
-        three_year_cagr = None
-        try:
-            three_year_date = (pd.to_datetime(to_date_db) - timedelta(days=3 * 365)).date()
-            hist_3yr = nse.fetch_equity_historical_data(trend_symbol_input, from_date=three_year_date, to_date=three_year_date)
-            close_3yr = hist_3yr[0]['CH_CLOSING_PRICE'] if hist_3yr else None
-            if close_3yr is not None and close_to is not None:
-                three_year_cagr = (((close_to / close_3yr) ** (1 / 3)) - 1) * 100
-        except Exception:
-            three_year_cagr = None
-
-        # Display Symbol, 1yr Return, and 3yr Return (CAGR) in equal-width columns
-        col1, col2, col3 = st.columns(3)
+        # Display Symbol, P2P, 1yr, and 3yr Return (CAGR) in equal-width columns
+        col1, col2, col3, col4 = st.columns(4)
         col1.markdown(f"<b>Symbol:</b> {trend_symbol_input}", unsafe_allow_html=True)
-        col2.markdown(f"<b>1yr Return:</b> {one_year_return:.2f}%" if one_year_return is not None else "<b>1yr Return:</b> N/A", unsafe_allow_html=True)
-        col3.markdown(f"<b>3yr Return (CAGR):</b> {three_year_cagr:.2f}%" if three_year_cagr is not None else "<b>3yr Return (CAGR):</b> N/A", unsafe_allow_html=True)
+        col2.markdown(f"<b>P2P Return:</b> {ptp_return:.2f}%" if ptp_return is not None else "<b>P2P Return:</b> N/A", unsafe_allow_html=True)
+        col3.markdown(f"<b>1yr Return:</b> {one_year_return:.2f}%" if one_year_return is not None else "<b>1yr Return:</b> N/A", unsafe_allow_html=True)
+        col4.markdown(f"<b>3yr Return (CAGR):</b> {three_year_cagr:.2f}%" if three_year_cagr is not None else "<b>3yr Return (CAGR):</b> N/A", unsafe_allow_html=True)
 
-        # Plot the graph
+        # Checkbox to show price return, rerun if toggled
+        show_price_return = st.checkbox("Show price return during the period", key="show_price_return")
+        if show_price_return != st.session_state.get("_last_show_price_return", None):
+            st.session_state["_last_show_price_return"] = show_price_return
+            st.rerun()
+
+        # Prepare Plotly figure
         trend_df['pct_change'] = trend_df['amt_financed_cr'].pct_change() * 100  # Calculate % change
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=trend_df['date'],
             y=trend_df['amt_financed_cr'],
             mode='lines+markers',
-            name='',  # Set name to an empty string to hide "trace 0"
+            name='Amount Financed (₹ Cr)',
             line=dict(color='blue', width=2),
             hovertemplate="<b>Date:</b> %{x}<br><b>Amount Financed:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
-            customdata=trend_df['pct_change']  # Pass % change as custom data
+            customdata=trend_df['pct_change']
         ))
+
+        # If checkbox is checked, fetch and plot price data
+        if show_price_return:
+            price_data = nse.fetch_equity_historical_data(
+                trend_symbol_input,
+                from_date=pd.to_datetime(from_date_db).date(),
+                to_date=pd.to_datetime(to_date_db).date()
+            )
+            if price_data:
+                price_df = pd.DataFrame(price_data)
+                price_df['date'] = pd.to_datetime(price_df['mTIMESTAMP'])
+                price_df = price_df.sort_values('date')
+                price_df['pct_change'] = price_df['CH_CLOSING_PRICE'].pct_change() * 100  # Calculate % change for price
+                fig.add_trace(go.Scatter(
+                    x=price_df['date'],
+                    y=price_df['CH_CLOSING_PRICE'],
+                    mode='lines+markers',
+                    name='Closing Price',
+                    line=dict(color='orange', width=2, dash='dot'),
+                    yaxis='y2',
+                    hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                    customdata=price_df['pct_change']  # Pass % change as custom data
+                ))
+                # Add secondary y-axis for price
+                fig.update_layout(
+                    yaxis2=dict(
+                        title="Closing Price (₹)",
+                        overlaying='y',
+                        side='right',
+                        showgrid=False
+                    )
+                )
+
         fig.update_layout(
             title=f"Amount Financed Trend for {trend_symbol_input}",
             xaxis_title="Date",
@@ -254,13 +286,15 @@ if show_trend_clicked:
             xaxis_range=[trend_df['date'].min(), trend_df['date'].max()],
             yaxis_range=[trend_df['amt_financed_cr'].min(), trend_df['amt_financed_cr'].max()],
             width=800,
-            height=400
+            height=400,
+            hovermode='x unified'  # <-- Add this line for unified hover and vertical cursor
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.subheader(f"No trend data available for {trend_symbol_input} in the selected range.")
 
-if show_net_outstanding_clicked:
+# --- Net Outstanding Trend Display ---
+if st.session_state.get("show_net_outstanding", False) or st.session_state.get("show_index_trend", False):
     with sqlite3.connect(DB_PATH) as conn:
         df_chart = pd.read_sql_query(
             "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date", conn
@@ -270,16 +304,56 @@ if show_net_outstanding_clicked:
         df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100  # Convert from Lakhs to Cr
         df_chart['pct_change'] = df_chart['net_outstanding_end_cr'].pct_change() * 100  # Calculate % change
 
+        # Persist index trend checkbox state and rerun if toggled
+        show_index_trend = st.checkbox("Show NIFTY TOTAL MARKET Index Trend", key="show_index_trend")
+        if show_index_trend != st.session_state.get("_last_show_index_trend", None):
+            st.session_state["_last_show_index_trend"] = show_index_trend
+            st.rerun()
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=df_chart['date'],
             y=df_chart['net_outstanding_end_cr'],
             mode='lines+markers',
-            name='',  # Set name to an empty string to hide "trace 0"
+            name='Net Outstanding End (₹ Cr)',
             line=dict(color='green', width=2),
             hovertemplate="<b>Date:</b> %{x}<br><b>Net Outstanding:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
-            customdata=df_chart['pct_change']  # Pass % change as custom data
+            customdata=df_chart['pct_change']
         ))
+
+        # If checkbox checked, plot index data as secondary y-axis
+        if show_index_trend:
+            index_data = nse.fetch_historical_index_data(
+                index="NIFTY TOTAL MARKET",
+                from_date=pd.to_datetime(df_chart['date'].min()).date(),
+                to_date=pd.to_datetime(df_chart['date'].max()).date()
+            )
+            price_list = index_data.get("price", [])
+            price_df = pd.DataFrame(price_list)
+            # Use EOD_CLOSE_INDEX_VAL for plotting, EOD_TIMESTAMP for date
+            if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
+                price_df['date'] = pd.to_datetime(price_df['EOD_TIMESTAMP'], format="%d-%b-%Y", errors='coerce')
+                price_df = price_df.sort_values('date')
+                price_df['pct_change'] = price_df['EOD_CLOSE_INDEX_VAL'].pct_change() * 100
+                fig.add_trace(go.Scatter(
+                    x=price_df['date'],
+                    y=price_df['EOD_CLOSE_INDEX_VAL'],
+                    mode='lines+markers',
+                    name='NIFTY TOTAL MARKET',
+                    line=dict(color='blue', width=2, dash='dot'),
+                    yaxis='y2',
+                    hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                    customdata=price_df['pct_change']
+                ))
+                fig.update_layout(
+                    yaxis2=dict(
+                        title="NIFTY TOTAL MARKET Close",
+                        overlaying='y',
+                        side='right',
+                        showgrid=False
+                    )
+                )
+
         fig.update_layout(
             title="Net Outstanding End (Daily Trend)",
             xaxis_title="Date",
@@ -287,10 +361,11 @@ if show_net_outstanding_clicked:
             xaxis_range=[df_chart['date'].min(), df_chart['date'].max()],
             yaxis_range=[df_chart['net_outstanding_end_cr'].min(), df_chart['net_outstanding_end_cr'].max()],
             width=800,
-            height=400
+            height=400,
+            hovermode='x unified'
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No summary data found.")
 
-st.caption("NSE MTF Analytics Dashboard - Powered by Streamlit")
+st.caption("NSE MTF Analytics Dashboard - Powered by Caffeine and Copilot")

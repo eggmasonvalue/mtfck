@@ -385,10 +385,10 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
             ffmc_list.append(ffmc_lakhs)
             exposure_pct_list.append(exposure_pct)
 
-            ptp_return, one_year_return, three_year_cagr = calculate_returns(row['symbol'], to_date, from_date)
-            ptp_return_list.append(ptp_return)
-            one_year_return_list.append(one_year_return)
-            three_year_cagr_list.append(three_year_cagr)
+            # ptp_return, one_year_return, three_year_cagr = calculate_returns(row['symbol'], to_date, from_date)
+            # ptp_return_list.append(ptp_return)
+            # one_year_return_list.append(one_year_return)
+            # three_year_cagr_list.append(three_year_cagr)
         # Assign columns before sorting and selecting columns
         df_new['Free Float Market Cap (₹ Lakhs)'] = ffmc_list if len(df_new) == len(ffmc_list) else [None] * len(df_new)
         df_new['Exposure (%)'] = exposure_pct_list if len(df_new) == len(exposure_pct_list) else [None] * len(df_new)
