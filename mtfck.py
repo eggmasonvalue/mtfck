@@ -398,6 +398,48 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
         # Do not sort or filter by top_n, return all
         return df_new
 
+def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = None):
+    """
+    Return top N stocks by exposure % (amt_financed / ffmc) on to_date.
+    Optionally filter by industries.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        if industries:
+            placeholders = ",".join("?" for _ in industries)
+            query = f"""
+                SELECT s.symbol, m.name, m.industry, s.amt_financed
+                FROM stock_data s
+                JOIN stock_master m ON s.symbol = m.symbol
+                WHERE s.date = ? AND m.industry IN ({placeholders})
+            """
+            params = (to_date, *industries)
+        else:
+            query = """
+                SELECT s.symbol, m.name, m.industry, s.amt_financed
+                FROM stock_data s
+                JOIN stock_master m ON s.symbol = m.symbol
+                WHERE s.date = ?
+            """
+            params = (to_date,)
+        df = pd.read_sql_query(query, conn, params=params)
+
+    ffmc_list = []
+    exposure_pct_list = []
+
+    for _, row in df.iterrows():
+        ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, 'amt_financed')
+        ffmc_list.append(ffmc_lakhs)
+        exposure_pct_list.append(exposure_pct)
+
+    df['Free Float Market Cap (₹ Lakhs)'] = ffmc_list
+    df['Exposure (%)'] = exposure_pct_list
+
+    df = df.dropna(subset=['Exposure (%)'])
+    df = df.sort_values('Exposure (%)', ascending=False).head(top_n)
+
+    # Only keep relevant columns
+    return df[['symbol', 'name', 'industry', 'amt_financed', 'Free Float Market Cap (₹ Lakhs)', 'Exposure (%)']]
+
 __all__ = [
     "DB_PATH",
     "download_and_store_range",
@@ -406,6 +448,7 @@ __all__ = [
     "get_top5_amt_financed",
     "get_top5_amt_financed_pct_change",
     "get_newly_added_stocks",
+    "get_top_exposure_stocks",
     "create_table",
 ]
 

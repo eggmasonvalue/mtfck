@@ -10,6 +10,7 @@ from mtfck import (
     get_top5_amt_financed,
     get_top5_amt_financed_pct_change,
     get_newly_added_stocks,
+    get_top_exposure_stocks,  # <-- add import
     create_table,
     nse,  # Import the nse instance
     calculate_returns,  
@@ -58,7 +59,8 @@ with st.sidebar:
     from_date = st.date_input("From Date", value=datetime.strptime(min_date, "%Y-%m-%d").date(), key="from_date")
     to_date = st.date_input("To Date", value=datetime.strptime(max_date, "%Y-%m-%d").date(), key="to_date")
     fetch_clicked = st.button("Fetch/Update Data for Selected Range", use_container_width=True)
-    top_n = st.selectbox("Number of Top Stocks", [5, 10, 15, 20], index=0)
+    # Change top_n from selectbox to slider
+    top_n = st.slider("Number of Top Stocks", min_value=5, max_value=50, value=5, step=1)
     industries = get_unique_industries()
     selected_industries = st.multiselect("Industry Filter (optional)", industries, default=[])
     function = st.selectbox(
@@ -66,9 +68,13 @@ with st.sidebar:
         [
             "Top by Amount Financed",
             "Top by % Change in Amount Financed",
-            "Newly Added MTF Stocks"
+            "Newly Added MTF Stocks",
+            "Top by Exposure %"  # <-- add new option
         ]
     )
+    # Add warning if exposure % selected and no industry filter
+    if function == "Top by Exposure %" and not selected_industries:
+        st.warning("For Exposure % analysis, please choose one or more industry filters to avoid long load time.")
     run_analysis = st.button("Run Analysis", use_container_width=True)
     st.markdown("---")
     
@@ -181,6 +187,16 @@ if run_analysis:
                 'industry': 'Industry',
                 'Exposure (%)': 'Exposure (%)'
             })
+        elif function == "Top by Exposure %":
+            df = get_top_exposure_stocks(to_date_db, top_n, selected_industries)
+            df['Amount Financed (₹ Cr)'] = df['amt_financed'] / 100
+            df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
+            df = df.rename(columns={
+                'symbol': 'Symbol',
+                'name': 'Name',
+                'industry': 'Industry',
+                'Exposure (%)': 'Exposure (%)'
+            })
         else:
             df = pd.DataFrame()
         st.session_state['analysis_df'] = df
@@ -207,6 +223,12 @@ if run_analysis:
         st.subheader(f"Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
         st.dataframe(
             df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']],
+            use_container_width=True
+        )
+    elif function == "Top by Exposure %":
+        st.subheader(f"Top {top_n} Stocks by Exposure % on {to_date_db}")
+        st.dataframe(
+            df[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
             use_container_width=True
         )
 

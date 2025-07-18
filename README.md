@@ -13,6 +13,7 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 - Industry information is fetched and cached for each symbol.
 - Tables are interactive and sortable.
 - Project structure is modular and extensible.
+- **New Exposure % Analysis**: Sort stocks by exposure % (amount financed / free float market cap).
 
 ## Usage
 
@@ -32,6 +33,7 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
    - Click "Run Analysis" to view results.
    - Use the "Trends" section to enter a symbol and view amount financed trends, price overlays, and index overlays.
    - All trend charts display monetary values in ₹ Crores and allow comparison with price and index movements.
+   - For "Top by Exposure %", you **must** select at least one industry filter, otherwise the analysis may take a very long time.
 
 4. **Data**  
    - Data is stored in `stock_data.db` and `data/` directory.
@@ -49,6 +51,9 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 - All amounts are displayed in ₹ Crores (Cr) for consistency.
 - Trend charts and tables are interactive and sortable.
 - Industry information is fetched and cached for each symbol.
+- Exposure % is calculated as: `amt_financed / free float market cap`.
+- Price data is not adjusted for corporate actions.
+- For best performance, always use industry filters when running exposure analysis.
 
 ## License
 
