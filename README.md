@@ -1,15 +1,18 @@
-# NSE MTF Analytics Dashboard
+# MTFCK! (NSE MTF Analytics Dashboard)
 
-A Streamlit dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top stocks by amount financed, exposure %, and trends.
+A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top stocks by amount financed, exposure %, returns, and interactive trends.
 
 ## Features
 
 - Download and store daily NSE Margin Trading Disclosure reports.
-- Analyze top stocks by amount financed, % change, and newly added MTF stocks.
-- Filter by industry and date range.
-- Interactive trend charts for each stock.
-- All monetary values displayed in ₹ Crores for clarity.
-- Data is stored in a local SQLite database.
+- Analyze top stocks by amount financed, % change in amount financed, and newly added MTF stocks.
+- Filter results by industry and date range.
+- View interactive trend charts for any stock, including overlays for price and index trends.
+- Display Free Float Market Cap (Cr), Exposure (%), Point-to-Point Return (%), 1yr Return (%), and 3yr CAGR for each stock.
+- Fast data fetch and update for missing date ranges.
+- Industry information is fetched and cached for each symbol.
+- Tables are interactive and sortable.
+- Project structure is modular and extensible.
 
 ## Usage
 
@@ -27,7 +30,8 @@ A Streamlit dashboard for analyzing NSE Margin Trading Facility (MTF) data, incl
    - Use the sidebar to select date range, industry, and analysis type.
    - Click "Fetch/Update Data for Selected Range" to download missing data.
    - Click "Run Analysis" to view results.
-   - Use the dropdown and "Show Trend" button above the table to view amount financed trends for any symbol.
+   - Use the "Trends" section to enter a symbol and view amount financed trends, price overlays, and index overlays.
+   - All trend charts display monetary values in ₹ Crores and allow comparison with price and index movements.
 
 4. **Data**  
    - Data is stored in `stock_data.db` and `data/` directory.
@@ -37,7 +41,6 @@ A Streamlit dashboard for analyzing NSE Margin Trading Facility (MTF) data, incl
 
 - `app.py` - Streamlit dashboard UI and logic.
 - `mtfck.py` - Data download, parsing, and analysis functions.
-- `NSE.py` - NSE India API wrapper.
 - `db/schema.sql` - SQLite schema.
 - `data/` - Downloaded CSV files.
 

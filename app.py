@@ -74,9 +74,9 @@ with st.sidebar:
     
     # --- Trends Section ---
     st.header("Trends")
+    show_net_outstanding_clicked = st.button("Show Total Outstanding Trend", key="net_outstanding_btn_sidebar")
     trend_symbol_input = st.text_input("Enter Symbol for Amount Financed Trend", key="trend_symbol_input").upper()
     show_trend_clicked = st.button("Show Amount Financed Trend", key="trend_btn_sidebar")
-    show_net_outstanding_clicked = st.button("Show Total Outstanding Trend", key="net_outstanding_btn_sidebar")
 
 st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 
