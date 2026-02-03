@@ -7,3 +7,7 @@
 *.gz
 *.csv
 .env
+
+.venv/
+.mv/
+.DS_Store

@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from mtfck import (
     DB_PATH,
     download_and_store_range,
@@ -13,29 +13,37 @@ from mtfck import (
     get_top_exposure_stocks,  # <-- add import
     create_table,
     nse,  # Import the nse instance
-    calculate_returns,  
-    get_ffmc_and_exposure  
+    calculate_returns,
+    get_ffmc_and_exposure,
 )
 import plotly.graph_objects as go
 
 # Ensure DB and tables exist
 create_table()
 
+
 def get_available_dates():
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            df = pd.read_sql_query("SELECT DISTINCT date FROM stock_data ORDER BY date", conn)
-        return df['date'].tolist()
+            df = pd.read_sql_query(
+                "SELECT DISTINCT date FROM stock_data ORDER BY date", conn
+            )
+        return df["date"].tolist()
     except Exception:
         return []
+
 
 def get_unique_industries():
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            df = pd.read_sql_query("SELECT DISTINCT industry FROM stock_master WHERE industry IS NOT NULL AND industry != '' ORDER BY industry", conn)
-        return df['industry'].dropna().tolist()
+            df = pd.read_sql_query(
+                "SELECT DISTINCT industry FROM stock_master WHERE industry IS NOT NULL AND industry != '' ORDER BY industry",
+                conn,
+            )
+        return df["industry"].dropna().tolist()
     except Exception:
         return []
+
 
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
 st.markdown(
@@ -44,7 +52,7 @@ st.markdown(
         MTFCK!
     </h1>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # --- Sidebar Controls ---
@@ -56,35 +64,56 @@ with st.sidebar:
         max_date = max(dates)
     else:
         min_date = max_date = date.today().strftime("%Y-%m-%d")
-    from_date = st.date_input("From Date", value=datetime.strptime(min_date, "%Y-%m-%d").date(), key="from_date")
-    to_date = st.date_input("To Date", value=datetime.strptime(max_date, "%Y-%m-%d").date(), key="to_date")
-    fetch_clicked = st.button("Fetch/Update Data for Selected Range", use_container_width=True)
+    from_date = st.date_input(
+        "From Date",
+        value=datetime.strptime(min_date, "%Y-%m-%d").date(),
+        key="from_date",
+    )
+    to_date = st.date_input(
+        "To Date", value=datetime.strptime(max_date, "%Y-%m-%d").date(), key="to_date"
+    )
+    fetch_clicked = st.button(
+        "Fetch/Update Data for Selected Range", use_container_width=True
+    )
     # Change top_n from selectbox to slider
-    top_n = st.slider("Number of Top Stocks", min_value=5, max_value=50, value=5, step=1)
+    top_n = st.slider(
+        "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
+    )
     industries = get_unique_industries()
-    selected_industries = st.multiselect("Industry Filter (optional)", industries, default=[])
+    selected_industries = st.multiselect(
+        "Industry Filter (optional)", industries, default=[]
+    )
     function = st.selectbox(
         "Analysis Type",
         [
             "Top by Amount Financed",
             "Top by % Change in Amount Financed",
             "Newly Added MTF Stocks",
-            "Top by Exposure %"  # <-- add new option
-        ]
+            "Top by Exposure %",  # <-- add new option
+        ],
     )
     # Add warning if exposure % selected and no industry filter
     if function == "Top by Exposure %" and not selected_industries:
-        st.warning("For Exposure % analysis, please choose one or more industry filters to avoid long load time.")
+        st.warning(
+            "For Exposure % analysis, please choose one or more industry filters to avoid long load time."
+        )
     run_analysis = st.button("Run Analysis", use_container_width=True)
     st.markdown("---")
-    
+
     # --- Trends Section ---
     st.header("Trends")
-    show_net_outstanding_clicked = st.button("Show Total Outstanding Trend", key="net_outstanding_btn_sidebar")
-    trend_symbol_input = st.text_input("Enter Symbol for Amount Financed Trend", key="trend_symbol_input").upper()
-    show_trend_clicked = st.button("Show Amount Financed Trend", key="trend_btn_sidebar")
+    show_net_outstanding_clicked = st.button(
+        "Show Total Outstanding Trend", key="net_outstanding_btn_sidebar"
+    )
+    trend_symbol_input = st.text_input(
+        "Enter Symbol for Amount Financed Trend", key="trend_symbol_input"
+    ).upper()
+    show_trend_clicked = st.button(
+        "Show Amount Financed Trend", key="trend_btn_sidebar"
+    )
 
 st.markdown(f"**Selected Range:** {from_date} to {to_date}")
+
 
 # --- Data Fetch Logic ---
 def ensure_data_in_db(from_date, to_date):
@@ -97,16 +126,21 @@ def ensure_data_in_db(from_date, to_date):
     if not db_min or not db_max:
         need_download = True
     else:
-        if from_date.strftime("%Y-%m-%d") < db_min or to_date.strftime("%Y-%m-%d") > db_max:
+        if (
+            from_date.strftime("%Y-%m-%d") < db_min
+            or to_date.strftime("%Y-%m-%d") > db_max
+        ):
             need_download = True
     if need_download:
         st.info("Fetching missing data from NSE. This may take a while...")
         download_and_store_range(from_date, to_date)
         st.success("Data updated!")
 
+
 if fetch_clicked:
     ensure_data_in_db(from_date, to_date)
     st.rerun()
+
 
 # --- Trend Analysis Logic ---
 def get_amt_financed_trend(symbol, from_date, to_date):
@@ -114,22 +148,27 @@ def get_amt_financed_trend(symbol, from_date, to_date):
         df = pd.read_sql_query(
             "SELECT date, amt_financed FROM stock_data WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
             conn,
-            params=(symbol, from_date, to_date)
+            params=(symbol, from_date, to_date),
         )
     if not df.empty:
-        df['date'] = pd.to_datetime(df['date'])
-        df['amt_financed_cr'] = df['amt_financed'] / 100
+        df["date"] = pd.to_datetime(df["date"])
+        df["amt_financed_cr"] = df["amt_financed"] / 100
     return df
 
+
 # --- Analysis Output Section ---
-if 'last_range' not in st.session_state:
-    st.session_state['last_range'] = {}
-if 'results' not in st.session_state:
-    st.session_state['results'] = {}
+if "last_range" not in st.session_state:
+    st.session_state["last_range"] = {}
+if "results" not in st.session_state:
+    st.session_state["results"] = {}
+
 
 def cache_key(function, from_date_db, to_date_db, top_n, selected_industries):
-    industries_key = ",".join(sorted(selected_industries)) if selected_industries else "ALL"
+    industries_key = (
+        ",".join(sorted(selected_industries)) if selected_industries else "ALL"
+    )
     return f"{function}|{from_date_db}|{to_date_db}|{top_n}|{industries_key}"
+
 
 from_date_db = get_next_available_date(from_date)
 to_date_db = get_prev_available_date(to_date)
@@ -139,97 +178,178 @@ if not from_date_db or not to_date_db:
     st.stop()
 
 key = cache_key(function, from_date_db, to_date_db, top_n, selected_industries)
-current_range = (from_date_db, to_date_db, top_n, tuple(sorted(selected_industries)) if selected_industries else ())
-last_range = st.session_state['last_range'].get(function)
-rerun_needed = (last_range != current_range) or (key not in st.session_state['results'])
+current_range = (
+    from_date_db,
+    to_date_db,
+    top_n,
+    tuple(sorted(selected_industries)) if selected_industries else (),
+)
+last_range = st.session_state["last_range"].get(function)
+rerun_needed = (last_range != current_range) or (key not in st.session_state["results"])
+
 
 def filter_by_industry(df, industry_map, selected_industries):
     if selected_industries:
-        df['Industry'] = df['Symbol'].map(industry_map)
-        df = df[df['Industry'].isin(selected_industries)]
+        df["Industry"] = df["Symbol"].map(industry_map)
+        df = df[df["Industry"].isin(selected_industries)]
     else:
-        df['Industry'] = df['Symbol'].map(industry_map)
+        df["Industry"] = df["Symbol"].map(industry_map)
     return df
+
 
 # --- Always get the latest analysis result for the current controls ---
 if run_analysis:
-    if rerun_needed or 'analysis_df' not in st.session_state or st.session_state.get('analysis_key') != key:
+    if (
+        rerun_needed
+        or "analysis_df" not in st.session_state
+        or st.session_state.get("analysis_key") != key
+    ):
         if function == "Top by Amount Financed":
-            df = get_top5_amt_financed(to_date_db, top_n, selected_industries, from_date_db)
-            df['Amount Financed (₹ Cr)'] = df['amt_financed'] / 100
-            df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
-            df = df.rename(columns={
-                'symbol': 'Symbol',
-                'name': 'Name',
-                'industry': 'Industry',
-                'Exposure (%)': 'Exposure (%)'
-            })
+            df = get_top5_amt_financed(
+                to_date_db, top_n, selected_industries, from_date_db
+            )
+            df["Amount Financed (₹ Cr)"] = df["amt_financed"] / 100
+            df["Free Float Market Cap (₹ Cr)"] = (
+                df["Free Float Market Cap (₹ Lakhs)"] / 100
+            )
+            df = df.rename(
+                columns={
+                    "symbol": "Symbol",
+                    "name": "Name",
+                    "industry": "Industry",
+                    "Exposure (%)": "Exposure (%)",
+                }
+            )
         elif function == "Top by % Change in Amount Financed":
-            df = get_top5_amt_financed_pct_change(from_date_db, to_date_db, top_n, selected_industries)
-            df['Amount Financed Start (₹ Cr)'] = df['amt_financed_from'] / 100
-            df['Amount Financed End (₹ Cr)'] = df['amt_financed_to'] / 100
-            df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
-            df = df.rename(columns={
-                'symbol': 'Symbol',
-                'name': 'Name',
-                'industry': 'Industry',
-                'pct_change': '% Change',
-                'Exposure (%)': 'Exposure (%)'
-            })
+            df = get_top5_amt_financed_pct_change(
+                from_date_db, to_date_db, top_n, selected_industries
+            )
+            df["Amount Financed Start (₹ Cr)"] = df["amt_financed_from"] / 100
+            df["Amount Financed End (₹ Cr)"] = df["amt_financed_to"] / 100
+            df["Free Float Market Cap (₹ Cr)"] = (
+                df["Free Float Market Cap (₹ Lakhs)"] / 100
+            )
+            df = df.rename(
+                columns={
+                    "symbol": "Symbol",
+                    "name": "Name",
+                    "industry": "Industry",
+                    "pct_change": "% Change",
+                    "Exposure (%)": "Exposure (%)",
+                }
+            )
         elif function == "Newly Added MTF Stocks":
             df = get_newly_added_stocks(from_date_db, to_date_db, selected_industries)
-            df['Amount Financed Start (₹ Cr)'] = df['amt_financed_from'] / 100
-            df['Amount Financed End (₹ Cr)'] = df['amt_financed_to'] / 100
-            df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
-            df = df.rename(columns={
-                'symbol': 'Symbol',
-                'name': 'Name',
-                'industry': 'Industry',
-                'Exposure (%)': 'Exposure (%)'
-            })
+            df["Amount Financed Start (₹ Cr)"] = df["amt_financed_from"] / 100
+            df["Amount Financed End (₹ Cr)"] = df["amt_financed_to"] / 100
+            df["Free Float Market Cap (₹ Cr)"] = (
+                df["Free Float Market Cap (₹ Lakhs)"] / 100
+            )
+            df = df.rename(
+                columns={
+                    "symbol": "Symbol",
+                    "name": "Name",
+                    "industry": "Industry",
+                    "Exposure (%)": "Exposure (%)",
+                }
+            )
         elif function == "Top by Exposure %":
             df = get_top_exposure_stocks(to_date_db, top_n, selected_industries)
-            df['Amount Financed (₹ Cr)'] = df['amt_financed'] / 100
-            df['Free Float Market Cap (₹ Cr)'] = df['Free Float Market Cap (₹ Lakhs)'] / 100
-            df = df.rename(columns={
-                'symbol': 'Symbol',
-                'name': 'Name',
-                'industry': 'Industry',
-                'Exposure (%)': 'Exposure (%)'
-            })
+            df["Amount Financed (₹ Cr)"] = df["amt_financed"] / 100
+            df["Free Float Market Cap (₹ Cr)"] = (
+                df["Free Float Market Cap (₹ Lakhs)"] / 100
+            )
+            df = df.rename(
+                columns={
+                    "symbol": "Symbol",
+                    "name": "Name",
+                    "industry": "Industry",
+                    "Exposure (%)": "Exposure (%)",
+                }
+            )
         else:
             df = pd.DataFrame()
-        st.session_state['analysis_df'] = df
-        st.session_state['analysis_key'] = key
+        st.session_state["analysis_df"] = df
+        st.session_state["analysis_key"] = key
     else:
-        df = st.session_state['analysis_df']
+        df = st.session_state["analysis_df"]
 
     # --- Dropdown below graph, button below dropdown, then subheader, then table ---
     if function == "Top by Amount Financed":
         st.subheader(f"Top {top_n} Stocks by Amount Financed on {to_date_db}")
         st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']],
-            use_container_width=True
+            df[
+                [
+                    "Symbol",
+                    "Name",
+                    "Industry",
+                    "Amount Financed (₹ Cr)",
+                    "Free Float Market Cap (₹ Cr)",
+                    "Exposure (%)",
+                    "1yr Return (%)",
+                    "3yr Return (%) (CAGR)",
+                    "Point-to-Point Return (%)",
+                ]
+            ],
+            use_container_width=True,
         )
 
     elif function == "Top by % Change in Amount Financed":
-        st.subheader(f"Top {top_n} Stocks by % Change in Amount Financed ({from_date_db} to {to_date_db})")
+        st.subheader(
+            f"Top {top_n} Stocks by % Change in Amount Financed ({from_date_db} to {to_date_db})"
+        )
         st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', '% Change', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']],
-            use_container_width=True
+            df[
+                [
+                    "Symbol",
+                    "Name",
+                    "Industry",
+                    "Amount Financed Start (₹ Cr)",
+                    "Amount Financed End (₹ Cr)",
+                    "% Change",
+                    "Free Float Market Cap (₹ Cr)",
+                    "Exposure (%)",
+                    "1yr Return (%)",
+                    "3yr Return (%) (CAGR)",
+                    "Point-to-Point Return (%)",
+                ]
+            ],
+            use_container_width=True,
         )
 
     elif function == "Newly Added MTF Stocks":
         st.subheader(f"Newly Added MTF Stocks ({from_date_db} to {to_date_db})")
         st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed Start (₹ Cr)', 'Amount Financed End (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)', '1yr Return (%)', '3yr Return (%) (CAGR)', 'Point-to-Point Return (%)']],
-            use_container_width=True
+            df[
+                [
+                    "Symbol",
+                    "Name",
+                    "Industry",
+                    "Amount Financed Start (₹ Cr)",
+                    "Amount Financed End (₹ Cr)",
+                    "Free Float Market Cap (₹ Cr)",
+                    "Exposure (%)",
+                    "1yr Return (%)",
+                    "3yr Return (%) (CAGR)",
+                    "Point-to-Point Return (%)",
+                ]
+            ],
+            use_container_width=True,
         )
     elif function == "Top by Exposure %":
         st.subheader(f"Top {top_n} Stocks by Exposure % on {to_date_db}")
         st.dataframe(
-            df[['Symbol', 'Name', 'Industry', 'Amount Financed (₹ Cr)', 'Free Float Market Cap (₹ Cr)', 'Exposure (%)']],
-            use_container_width=True
+            df[
+                [
+                    "Symbol",
+                    "Name",
+                    "Industry",
+                    "Amount Financed (₹ Cr)",
+                    "Free Float Market Cap (₹ Cr)",
+                    "Exposure (%)",
+                ]
+            ],
+            use_container_width=True,
         )
 
 # --- Trend Analysis Display ---
@@ -244,9 +364,12 @@ if show_trend_clicked:
             )
             # Use last available row for ffmc/exposure
             if not trend_df.empty:
-                amt_field = 'amt_financed'
+                amt_field = "amt_financed"
                 last_row = trend_df.iloc[-1]
-                ffmc_lakhs, exposure_pct = get_ffmc_and_exposure({'symbol': trend_symbol_input, amt_field: last_row[amt_field]}, amt_field)
+                ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(
+                    {"symbol": trend_symbol_input, amt_field: last_row[amt_field]},
+                    amt_field,
+                )
         except Exception:
             ptp_return, one_year_return, three_year_cagr = None, None, None
             ffmc_lakhs, exposure_pct = None, None
@@ -256,55 +379,84 @@ if show_trend_clicked:
 
         st.markdown(
             f"<div style='font-weight:bold;font-size:1.5em'>{trend_symbol_input}</div>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
         col1, col2, col3, col4, col5 = st.columns(5)
-        col1.markdown(f"<b>Free Float Market Cap:</b><br>{ffmc_cr:.2f} Cr" if ffmc_cr is not None else "<b>Free Float Market Cap:</b><br>N/A", unsafe_allow_html=True)
-        col2.markdown(f"<b>Exposure (%):</b><br>{exposure_pct:.2f}%" if exposure_pct is not None else "<b>Exposure (%):</b><br>N/A", unsafe_allow_html=True)
-        col3.markdown(f"<b>P2P Return:</b><br>{ptp_return:.2f}%" if ptp_return is not None else "<b>P2P Return:</b><br>N/A", unsafe_allow_html=True)
-        col4.markdown(f"<b>1yr Return:</b><br>{one_year_return:.2f}%" if one_year_return is not None else "<b>1yr Return:</b><br>N/A", unsafe_allow_html=True)
-        col5.markdown(f"<b>3yr CAGR:</b><br>{three_year_cagr:.2f}%" if three_year_cagr is not None else "<b>3yr CAGR:</b><br>N/A", unsafe_allow_html=True)
+        col1.markdown(
+            f"<b>Free Float Market Cap:</b><br>{ffmc_cr:.2f} Cr"
+            if ffmc_cr is not None
+            else "<b>Free Float Market Cap:</b><br>N/A",
+            unsafe_allow_html=True,
+        )
+        col2.markdown(
+            f"<b>Exposure (%):</b><br>{exposure_pct:.2f}%"
+            if exposure_pct is not None
+            else "<b>Exposure (%):</b><br>N/A",
+            unsafe_allow_html=True,
+        )
+        col3.markdown(
+            f"<b>P2P Return:</b><br>{ptp_return:.2f}%"
+            if ptp_return is not None
+            else "<b>P2P Return:</b><br>N/A",
+            unsafe_allow_html=True,
+        )
+        col4.markdown(
+            f"<b>1yr Return:</b><br>{one_year_return:.2f}%"
+            if one_year_return is not None
+            else "<b>1yr Return:</b><br>N/A",
+            unsafe_allow_html=True,
+        )
+        col5.markdown(
+            f"<b>3yr CAGR:</b><br>{three_year_cagr:.2f}%"
+            if three_year_cagr is not None
+            else "<b>3yr CAGR:</b><br>N/A",
+            unsafe_allow_html=True,
+        )
 
-        trend_df['pct_change'] = trend_df['amt_financed_cr'].pct_change() * 100
+        trend_df["pct_change"] = trend_df["amt_financed_cr"].pct_change() * 100
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=trend_df['date'],
-            y=trend_df['amt_financed_cr'],
-            mode='lines+markers',
-            name='Amount Financed (₹ Cr)',
-            line=dict(color='blue', width=2),
-            hovertemplate="<b>Date:</b> %{x}<br><b>Amount Financed:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
-            customdata=trend_df['pct_change']
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=trend_df["date"],
+                y=trend_df["amt_financed_cr"],
+                mode="lines+markers",
+                name="Amount Financed (₹ Cr)",
+                line=dict(color="blue", width=2),
+                hovertemplate="<b>Date:</b> %{x}<br><b>Amount Financed:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
+                customdata=trend_df["pct_change"],
+            )
+        )
 
         # Always show price overlay when button is clicked
         price_data = nse.fetch_equity_historical_data(
             trend_symbol_input,
             from_date=pd.to_datetime(from_date_db).date(),
-            to_date=pd.to_datetime(to_date_db).date()
+            to_date=pd.to_datetime(to_date_db).date(),
         )
         if price_data:
             price_df = pd.DataFrame(price_data)
-            price_df['date'] = pd.to_datetime(price_df['mTIMESTAMP'])
-            price_df = price_df.sort_values('date')
-            price_df['pct_change'] = price_df['CH_CLOSING_PRICE'].pct_change() * 100
-            fig.add_trace(go.Scatter(
-                x=price_df['date'],
-                y=price_df['CH_CLOSING_PRICE'],
-                mode='lines+markers',
-                name='Closing Price',
-                line=dict(color='orange', width=2, dash='dot'),
-                yaxis='y2',
-                hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                customdata=price_df['pct_change']
-            ))
+            price_df["date"] = pd.to_datetime(price_df["mTIMESTAMP"])
+            price_df = price_df.sort_values("date")
+            price_df["pct_change"] = price_df["CH_CLOSING_PRICE"].pct_change() * 100
+            fig.add_trace(
+                go.Scatter(
+                    x=price_df["date"],
+                    y=price_df["CH_CLOSING_PRICE"],
+                    mode="lines+markers",
+                    name="Closing Price",
+                    line=dict(color="orange", width=2, dash="dot"),
+                    yaxis="y2",
+                    hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                    customdata=price_df["pct_change"],
+                )
+            )
             fig.update_layout(
                 yaxis2=dict(
                     title="Closing Price (₹)",
-                    overlaying='y',
-                    side='right',
-                    showgrid=False
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
                 )
             )
 
@@ -312,15 +464,20 @@ if show_trend_clicked:
             title=f"Amount Financed Trend for {trend_symbol_input}",
             xaxis_title="Date",
             yaxis_title="Amount Financed (₹ Cr)",
-            xaxis_range=[trend_df['date'].min(), trend_df['date'].max()],
-            yaxis_range=[trend_df['amt_financed_cr'].min(), trend_df['amt_financed_cr'].max()],
+            xaxis_range=[trend_df["date"].min(), trend_df["date"].max()],
+            yaxis_range=[
+                trend_df["amt_financed_cr"].min(),
+                trend_df["amt_financed_cr"].max(),
+            ],
             width=800,
             height=400,
-            hovermode='x unified'
+            hovermode="x unified",
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.subheader(f"No trend data available for {trend_symbol_input} in the selected range.")
+        st.subheader(
+            f"No trend data available for {trend_symbol_input} in the selected range."
+        )
 
 # --- Net Outstanding Trend Display ---
 if show_net_outstanding_clicked:
@@ -329,49 +486,55 @@ if show_net_outstanding_clicked:
             "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date", conn
         )
     if not df_chart.empty:
-        df_chart['date'] = pd.to_datetime(df_chart['date'])
-        df_chart['net_outstanding_end_cr'] = df_chart['net_outstanding_end'] / 100
-        df_chart['pct_change'] = df_chart['net_outstanding_end_cr'].pct_change() * 100
+        df_chart["date"] = pd.to_datetime(df_chart["date"])
+        df_chart["net_outstanding_end_cr"] = df_chart["net_outstanding_end"] / 100
+        df_chart["pct_change"] = df_chart["net_outstanding_end_cr"].pct_change() * 100
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_chart['date'],
-            y=df_chart['net_outstanding_end_cr'],
-            mode='lines+markers',
-            name='Net Outstanding End (₹ Cr)',
-            line=dict(color='green', width=2),
-            hovertemplate="<b>Date:</b> %{x}<br><b>Net Outstanding:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
-            customdata=df_chart['pct_change']
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df_chart["date"],
+                y=df_chart["net_outstanding_end_cr"],
+                mode="lines+markers",
+                name="Net Outstanding End (₹ Cr)",
+                line=dict(color="green", width=2),
+                hovertemplate="<b>Date:</b> %{x}<br><b>Net Outstanding:</b> ₹%{y:.2f} Cr<br><b>% Change:</b> %{customdata:.2f}%",
+                customdata=df_chart["pct_change"],
+            )
+        )
 
         # Always show index overlay when button is clicked
         index_data = nse.fetch_historical_index_data(
             index="NIFTY TOTAL MARKET",
-            from_date=pd.to_datetime(df_chart['date'].min()).date(),
-            to_date=pd.to_datetime(df_chart['date'].max()).date()
+            from_date=pd.to_datetime(df_chart["date"].min()).date(),
+            to_date=pd.to_datetime(df_chart["date"].max()).date(),
         )
         price_list = index_data.get("price", [])
         price_df = pd.DataFrame(price_list)
         if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
-            price_df['date'] = pd.to_datetime(price_df['EOD_TIMESTAMP'], format="%d-%b-%Y", errors='coerce')
-            price_df = price_df.sort_values('date')
-            price_df['pct_change'] = price_df['EOD_CLOSE_INDEX_VAL'].pct_change() * 100
-            fig.add_trace(go.Scatter(
-                x=price_df['date'],
-                y=price_df['EOD_CLOSE_INDEX_VAL'],
-                mode='lines+markers',
-                name='NIFTY TOTAL MARKET',
-                line=dict(color='blue', width=2, dash='dot'),
-                yaxis='y2',
-                hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                customdata=price_df['pct_change']
-            ))
+            price_df["date"] = pd.to_datetime(
+                price_df["EOD_TIMESTAMP"], format="%d-%b-%Y", errors="coerce"
+            )
+            price_df = price_df.sort_values("date")
+            price_df["pct_change"] = price_df["EOD_CLOSE_INDEX_VAL"].pct_change() * 100
+            fig.add_trace(
+                go.Scatter(
+                    x=price_df["date"],
+                    y=price_df["EOD_CLOSE_INDEX_VAL"],
+                    mode="lines+markers",
+                    name="NIFTY TOTAL MARKET",
+                    line=dict(color="blue", width=2, dash="dot"),
+                    yaxis="y2",
+                    hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                    customdata=price_df["pct_change"],
+                )
+            )
             fig.update_layout(
                 yaxis2=dict(
                     title="NIFTY TOTAL MARKET Close",
-                    overlaying='y',
-                    side='right',
-                    showgrid=False
+                    overlaying="y",
+                    side="right",
+                    showgrid=False,
                 )
             )
 
@@ -379,11 +542,14 @@ if show_net_outstanding_clicked:
             title="Net Outstanding End (Daily Trend)",
             xaxis_title="Date",
             yaxis_title="Net Outstanding End (₹ Cr)",
-            xaxis_range=[df_chart['date'].min(), df_chart['date'].max()],
-            yaxis_range=[df_chart['net_outstanding_end_cr'].min(), df_chart['net_outstanding_end_cr'].max()],
+            xaxis_range=[df_chart["date"].min(), df_chart["date"].max()],
+            yaxis_range=[
+                df_chart["net_outstanding_end_cr"].min(),
+                df_chart["net_outstanding_end_cr"].max(),
+            ],
             width=800,
             height=400,
-            hovermode='x unified'
+            hovermode="x unified",
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
