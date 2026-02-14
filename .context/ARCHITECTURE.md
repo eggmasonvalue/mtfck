@@ -2,12 +2,12 @@
 
 ## Components
 
-### 1. Data Ingestion Layer (`ingestion.py`)
+### 1. Data Ingestion Layer (`src/mtfck/ingestion.py`)
 -   **Responsibility**: Validates local DB state vs NSE Archives, downloads missing daily Zip reports, parses CSVs, and updates SQLite.
 -   **Key Functions**: `update_to_today()`, `download_and_store_range()`.
 -   **Automation**: Triggered daily via GitHub Actions.
 
-### 2. Core Logic Layer (`mtfck.py`)
+### 2. Core Logic Layer (`src/mtfck/mtfck.py`)
 -   **Responsibility**: Querying the SQLite database for analytical views (Top Stocks, Trends, New Additions).
 -   **Dependencies**: Imports DB path and helper functions from `ingestion.py`.
 
