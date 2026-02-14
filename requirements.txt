@@ -1,6 +1,0 @@
-nse
-pandas
-plotly
-streamlit
-requests
-matplotlib

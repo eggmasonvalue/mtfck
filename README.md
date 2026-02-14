@@ -17,14 +17,14 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 
 ## Usage
 
-1. **Install requirements**  
-   ```
-   pip install -r requirements.txt
+1. **Install dependencies**  
+   ```bash
+   uv sync
    ```
 
 2. **Run the dashboard**  
-   ```
-   streamlit run app.py
+   ```bash
+   uv run streamlit run app.py
    ```
 
 3. **Controls**  
@@ -55,6 +55,12 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 - Price data is not adjusted for corporate actions.
 - For best performance, always use industry filters when running exposure analysis.
 
-## License
 
+# Challenges:
+- Likely to be abandoned/completely refactored due to several challenges
+  - throttling/rate limiting of data from NSE because of most functions requiring high frequency fetches - difficult to perform analysis by fetching exposure, ffmcap, return and other metrics, difficult to fetch and store stock-industry mapping data etc
+  - all of it can be fixed but the juice isn't worth the squeeze. much better alternative approaches available
+
+
+## License
 MIT License

@@ -1,8 +1,13 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent / "src"))
+
 import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime, date
-from mtfck import (
+from mtfck.mtfck import (
     DB_PATH,
     download_and_store_range,
     get_next_available_date,
@@ -10,9 +15,9 @@ from mtfck import (
     get_top5_amt_financed,
     get_top5_amt_financed_pct_change,
     get_newly_added_stocks,
-    get_top_exposure_stocks,  # <-- add import
+    get_top_exposure_stocks,
     create_table,
-    nse,  # Import the nse instance
+    nse,
     calculate_returns,
     get_ffmc_and_exposure,
 )
@@ -146,7 +151,7 @@ if fetch_clicked:
 def get_amt_financed_trend(symbol, from_date, to_date):
     with sqlite3.connect(DB_PATH) as conn:
         df = pd.read_sql_query(
-            "SELECT date, amt_financed FROM stock_data WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
+            "SELECT s.date, s.amt_financed FROM stock_data s JOIN stock_master m ON s.stock_id = m.stock_id WHERE m.symbol = ? AND s.date BETWEEN ? AND ? ORDER BY s.date",
             conn,
             params=(symbol, from_date, to_date),
         )
@@ -436,21 +441,30 @@ if show_trend_clicked:
         )
         if price_data:
             price_df = pd.DataFrame(price_data)
-            price_df["date"] = pd.to_datetime(price_df["mTIMESTAMP"])
-            price_df = price_df.sort_values("date")
-            price_df["pct_change"] = price_df["CH_CLOSING_PRICE"].pct_change() * 100
-            fig.add_trace(
-                go.Scatter(
-                    x=price_df["date"],
-                    y=price_df["CH_CLOSING_PRICE"],
-                    mode="lines+markers",
-                    name="Closing Price",
-                    line=dict(color="orange", width=2, dash="dot"),
-                    yaxis="y2",
-                    hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                    customdata=price_df["pct_change"],
-                )
+            # Handle potential column name changes in v2
+            timestamp_col = (
+                "mTIMESTAMP" if "mTIMESTAMP" in price_df.columns else "CH_TIMESTAMP"
             )
+            closing_col = "CH_CLOSING_PRICE"
+
+            if timestamp_col in price_df.columns and closing_col in price_df.columns:
+                price_df["date"] = pd.to_datetime(
+                    price_df[timestamp_col], errors="coerce"
+                )  # Format might vary
+                price_df = price_df.sort_values("date")
+                price_df["pct_change"] = price_df[closing_col].pct_change() * 100
+                fig.add_trace(
+                    go.Scatter(
+                        x=price_df["date"],
+                        y=price_df["CH_CLOSING_PRICE"],
+                        mode="lines+markers",
+                        name="Closing Price",
+                        line=dict(color="orange", width=2, dash="dot"),
+                        yaxis="y2",
+                        hovertemplate="<b>Date:</b> %{x}<br><b>Closing Price:</b> ₹%{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                        customdata=price_df["pct_change"],
+                    )
+                )
             fig.update_layout(
                 yaxis2=dict(
                     title="Closing Price (₹)",
@@ -504,31 +518,46 @@ if show_net_outstanding_clicked:
         )
 
         # Always show index overlay when button is clicked
-        index_data = nse.fetch_historical_index_data(
-            index="NIFTY TOTAL MARKET",
-            from_date=pd.to_datetime(df_chart["date"].min()).date(),
-            to_date=pd.to_datetime(df_chart["date"].max()).date(),
-        )
-        price_list = index_data.get("price", [])
+        try:
+            index_data = nse.fetch_historical_index_data(
+                index="NIFTY TOTAL MARKET",
+                from_date=pd.to_datetime(df_chart["date"].min()).date(),
+                to_date=pd.to_datetime(df_chart["date"].max()).date(),
+            )
+            # v2.0.0 returns a list of dicts directly
+            price_list = index_data if isinstance(index_data, list) else []
+        except Exception as e:
+            print(f"Error fetching index data: {e}")
+            price_list = []
+
         price_df = pd.DataFrame(price_list)
         if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
-            price_df["date"] = pd.to_datetime(
-                price_df["EOD_TIMESTAMP"], format="%d-%b-%Y", errors="coerce"
-            )
-            price_df = price_df.sort_values("date")
-            price_df["pct_change"] = price_df["EOD_CLOSE_INDEX_VAL"].pct_change() * 100
-            fig.add_trace(
-                go.Scatter(
-                    x=price_df["date"],
-                    y=price_df["EOD_CLOSE_INDEX_VAL"],
-                    mode="lines+markers",
-                    name="NIFTY TOTAL MARKET",
-                    line=dict(color="blue", width=2, dash="dot"),
-                    yaxis="y2",
-                    hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
-                    customdata=price_df["pct_change"],
+            # Ensure date column handling matches new format if needed
+            # Old code used EOD_TIMESTAMP, let's verify if that key still exists or use logic to find date key
+            timestamp_col = (
+                "EOD_TIMESTAMP" if "EOD_TIMESTAMP" in price_df.columns else "mTIMESTAMP"
+            )  # Fallback if needed
+
+            if timestamp_col in price_df.columns:
+                price_df["date"] = pd.to_datetime(
+                    price_df[timestamp_col], format="%d-%b-%Y", errors="coerce"
                 )
-            )
+                price_df = price_df.sort_values("date")
+                price_df["pct_change"] = (
+                    price_df["EOD_CLOSE_INDEX_VAL"].pct_change() * 100
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=price_df["date"],
+                        y=price_df["EOD_CLOSE_INDEX_VAL"],
+                        mode="lines+markers",
+                        name="NIFTY TOTAL MARKET",
+                        line=dict(color="blue", width=2, dash="dot"),
+                        yaxis="y2",
+                        hovertemplate="<b>Date:</b> %{x}<br><b>Index Close:</b> %{y:.2f}<br><b>% Change:</b> %{customdata:.2f}%",
+                        customdata=price_df["pct_change"],
+                    )
+                )
             fig.update_layout(
                 yaxis2=dict(
                     title="NIFTY TOTAL MARKET Close",

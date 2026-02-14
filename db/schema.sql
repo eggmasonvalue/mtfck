@@ -1,15 +1,17 @@
 CREATE TABLE IF NOT EXISTS stock_master (
-    symbol TEXT PRIMARY KEY,
+    stock_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT UNIQUE,
     name TEXT,
     industry TEXT
 );
 
 CREATE TABLE IF NOT EXISTS stock_data (
     date DATE,
-    symbol TEXT,
+    stock_id INTEGER,
     qty_financed INTEGER,
     amt_financed REAL,
-    FOREIGN KEY(symbol) REFERENCES stock_master(symbol)
+    PRIMARY KEY (date, stock_id),
+    FOREIGN KEY(stock_id) REFERENCES stock_master(stock_id)
 );
 
 CREATE TABLE IF NOT EXISTS daily_summary (

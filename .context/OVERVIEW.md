@@ -10,8 +10,10 @@ A Streamlit-based dashboard for analyzing NSE Margin Trading Facility (MTF) data
 - **New Additions**: Identify stocks newly added to the MTF list.
 
 ## Tech Stack
-- **Frontend**: Streamlit
-- **Backend/Logic**: Python (`mtfck.py`)
-- **Data Ingestion**: Python (`ingestion.py`) - Handles fetching and parsing NSE reports.
-- **Database**: SQLite (`stock_data.db`)
+- **Frontend**: Streamlit (`app.py`)
+- **Backend/Logic**: Python (`src/mtfck/mtfck.py`)
+- **Data Ingestion**: Python (`src/mtfck/ingestion.py`) - Handles fetching and parsing NSE reports.
+- **Database**: SQLite (`db/stock_data.db`)
 - **Data Source**: NSE Archives (ZIP/CSV) & Live Quotes
+
+
