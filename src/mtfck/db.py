@@ -1,7 +1,7 @@
 
 import duckdb
 
-DB_PATH = "./db/stock_data.duckdb"
+DB_PATH = "./mtf_data/stock_data.duckdb"
 _SHARED_CONN = None
 
 def get_connection(read_only=False):

@@ -64,3 +64,12 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 
 ## License
 MIT License
+
+
+
+## Task 1: Separation of concerns
+The MTF database must be segregated to https://github.com/eggmasonvalue/MTFDB(currently empty) and it should be a submodule to the current module. MTFDB will house just the database and a GitHub workflow. The workflow will clone the current repo to update and maintain that database
+## Task 2: maintainance
+ ### symbol renaming: 
+The database maintainer/updater function should have the following logic: -  this link contains a CSV file for the list of all symbol changes historically:https://nsearchives.nseindia.com/content/equities/symbolchange.csv
+Download this .csv and use this to come up with a strategy to merge data where data exists with the old name in part of the db and with the new name for the rest

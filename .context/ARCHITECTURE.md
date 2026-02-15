@@ -15,5 +15,5 @@
 -   **Responsibility**: Streamlit dashboard interface.
 
 ## Data Flow
-1.  **Daily Update**: GitHub Action -> `ingestion.py` -> `stock_data.duckdb` (Commit/Push)
+1.  **Daily Update**: GitHub Action (in `MTFDB` submodule) -> `ingestion.py` -> `mtf_data/stock_data.duckdb` (Commit/Push to Submodule)
 2.  **User Access**: `app.py` -> `mtfck.py` -> `stock_data.duckdb` (Read Only)
