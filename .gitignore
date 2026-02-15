@@ -1,6 +1,5 @@
 /data/
 /__pycache__/
-#**/*.db
 *.pyc
 *.pkl
 *.zip
@@ -11,3 +10,5 @@
 .venv/
 .mv/
 .DS_Store
+
+/scripts/

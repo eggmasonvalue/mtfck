@@ -5,8 +5,9 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 import streamlit as st
 import pandas as pd
-import sqlite3
+# import sqlite3  <-- Removed
 from datetime import datetime, date
+from mtfck.db import get_connection  # Used for direct DB access
 from mtfck.mtfck import (
     DB_PATH,
     download_and_store_range,
@@ -20,31 +21,36 @@ from mtfck.mtfck import (
     nse,
     calculate_returns,
     get_ffmc_and_exposure,
+    migrate_legacy_data,
 )
 import plotly.graph_objects as go
 
 # Ensure DB and tables exist
 create_table()
+# Try auto-migration of legacy data
+try:
+    migrate_legacy_data()
+except Exception as e:
+    st.error(f"Migration Error: {e}")
 
 
 def get_available_dates():
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            df = pd.read_sql_query(
-                "SELECT DISTINCT date FROM stock_data ORDER BY date", conn
-            )
-        return df["date"].tolist()
+        conn = get_connection()
+        # DuckDB read_sql_query works, or we can use conn.sql().df()
+        df = conn.sql("SELECT DISTINCT date FROM stock_data ORDER BY date").df()
+        # Ensure we return strings in YYYY-MM-DD format to avoid timestamp issues
+        return pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d").tolist()
     except Exception:
         return []
 
 
 def get_unique_industries():
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            df = pd.read_sql_query(
-                "SELECT DISTINCT industry FROM stock_master WHERE industry IS NOT NULL AND industry != '' ORDER BY industry",
-                conn,
-            )
+        conn = get_connection()
+        df = conn.sql(
+            "SELECT DISTINCT industry FROM stock_master WHERE industry IS NOT NULL AND industry != '' ORDER BY industry"
+        ).df()
         return df["industry"].dropna().tolist()
     except Exception:
         return []
@@ -71,11 +77,11 @@ with st.sidebar:
         min_date = max_date = date.today().strftime("%Y-%m-%d")
     from_date = st.date_input(
         "From Date",
-        value=datetime.strptime(min_date, "%Y-%m-%d").date(),
+        value=datetime.strptime(str(min_date), "%Y-%m-%d").date(),
         key="from_date",
     )
     to_date = st.date_input(
-        "To Date", value=datetime.strptime(max_date, "%Y-%m-%d").date(), key="to_date"
+        "To Date", value=datetime.strptime(str(max_date), "%Y-%m-%d").date(), key="to_date"
     )
     fetch_clicked = st.button(
         "Fetch/Update Data for Selected Range", use_container_width=True
@@ -122,24 +128,32 @@ st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 
 # --- Data Fetch Logic ---
 def ensure_data_in_db(from_date, to_date):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data")
-        row = cur.fetchone()
+    conn = get_connection()
+    # DuckDB returns None if table doesn't exist or empty, need to handle gracefully
+    try:
+        row = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data").fetchone()
         db_min = row[0]
         db_max = row[1]
+    except Exception:
+        db_min = None
+        db_max = None
+        
     need_download = False
     if not db_min or not db_max:
         need_download = True
     else:
-        if (
-            from_date.strftime("%Y-%m-%d") < db_min
-            or to_date.strftime("%Y-%m-%d") > db_max
-        ):
+        # db_min/max are dates, standard comparison should work
+        # Convert inputs to strings if needed for specific logic, but date objects compare fine usually
+        if from_date < db_min or to_date > db_max:
             need_download = True
+            
     if need_download:
         st.info("Fetching missing data from NSE. This may take a while...")
-        download_and_store_range(from_date, to_date)
-        st.success("Data updated!")
+        try:
+            download_and_store_range(from_date, to_date)
+            st.success("Data updated!")
+        except Exception as e:
+            st.error(f"Error updating data: {e}")
 
 
 if fetch_clicked:
@@ -149,12 +163,13 @@ if fetch_clicked:
 
 # --- Trend Analysis Logic ---
 def get_amt_financed_trend(symbol, from_date, to_date):
-    with sqlite3.connect(DB_PATH) as conn:
-        df = pd.read_sql_query(
-            "SELECT s.date, s.amt_financed FROM stock_data s JOIN stock_master m ON s.stock_id = m.stock_id WHERE m.symbol = ? AND s.date BETWEEN ? AND ? ORDER BY s.date",
-            conn,
-            params=(symbol, from_date, to_date),
-        )
+    conn = get_connection()
+    # Use DuckDB parameterized execute and .df()
+    df = conn.execute(
+        "SELECT s.date, s.amt_financed FROM stock_data s JOIN stock_master m ON s.stock_id = m.stock_id WHERE m.symbol = ? AND s.date BETWEEN ? AND ? ORDER BY s.date",
+        (symbol, from_date, to_date)
+    ).df()
+    
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
         df["amt_financed_cr"] = df["amt_financed"] / 100
@@ -180,17 +195,21 @@ to_date_db = get_prev_available_date(to_date)
 
 if not from_date_db or not to_date_db:
     st.warning("No data available for the selected range. Please fetch/update data.")
-    st.stop()
+    # But allow fetch button to work! The stop() prevents rendering below, which is fine
+    # But if fetch_clicked was set, it runs above and re-runs.
+    if not fetch_clicked:
+        st.stop()
 
-key = cache_key(function, from_date_db, to_date_db, top_n, selected_industries)
-current_range = (
-    from_date_db,
-    to_date_db,
-    top_n,
-    tuple(sorted(selected_industries)) if selected_industries else (),
-)
-last_range = st.session_state["last_range"].get(function)
-rerun_needed = (last_range != current_range) or (key not in st.session_state["results"])
+if from_date_db and to_date_db:
+    key = cache_key(function, from_date_db, to_date_db, top_n, selected_industries)
+    current_range = (
+        from_date_db,
+        to_date_db,
+        top_n,
+        tuple(sorted(selected_industries)) if selected_industries else (),
+    )
+    last_range = st.session_state["last_range"].get(function)
+    rerun_needed = (last_range != current_range) or (key not in st.session_state["results"])
 
 
 def filter_by_industry(df, industry_map, selected_industries):
@@ -495,10 +514,11 @@ if show_trend_clicked:
 
 # --- Net Outstanding Trend Display ---
 if show_net_outstanding_clicked:
-    with sqlite3.connect(DB_PATH) as conn:
-        df_chart = pd.read_sql_query(
-            "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date", conn
-        )
+    conn = get_connection()
+    df_chart = conn.sql(
+        "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date"
+    ).df()
+    
     if not df_chart.empty:
         df_chart["date"] = pd.to_datetime(df_chart["date"])
         df_chart["net_outstanding_end_cr"] = df_chart["net_outstanding_end"] / 100

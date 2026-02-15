@@ -2,7 +2,16 @@
 
 
 ## [Unreleased]
-### Added
+
+### Changed
+- **Database**: Migrated backend storage from SQLite (`stock_data.db`) to DuckDB (`stock_data.duckdb`) for ~10-20x storage efficiency gains using columnar compression.
+- **Dependencies**: Added `duckdb` (v1.2.0+).
+- **Ingestion**: Refactored `ingestion.py` to use DuckDB's native SQL engine for faster bulk inserts.
+- **Schema**: Updated `schema.sql` to use DuckDB-compatible `SEQUENCE` for auto-incrementing IDs.
+- **Fix**: Replaced legacy `sqlite3` usage in `app.py` with DuckDB shared connection.
+- **Fix**: Updated `get_available_dates` to handle DuckDB/Pandas timestamps correctly, fixing `ValueError`.
+- **Migration**: Added auto-migration in `app.py` to import legacy SQLite data if DuckDB is essentially empty (preserves history).
+- **Concurrency**: Implemented `db.py` singleton to allow Streamlit app to handle ingestion and querying simultaneously without file locking errors.
 
 ## [0.3.0] - 2026-02-15
 ### Added

@@ -1,10 +1,10 @@
 from datetime import date, timedelta
 from pathlib import Path
-import sqlite3
+import duckdb
 import pandas as pd
 from nse import NSE
+from .db import get_connection, DB_PATH, close_connection
 
-DB_PATH = "./db/stock_data.db"
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 SCHEMA_PATH = "./db/schema.sql"
@@ -14,19 +14,21 @@ nse = NSE(download_folder=DATA_DIR)
 
 def create_table():
     """Create tables if they do not exist."""
-    with sqlite3.connect(DB_PATH) as conn:
-        with open(SCHEMA_PATH, "r") as f:
-            conn.executescript(f.read())
-        # Ensure daily_summary table exists (redundant if in schema.sql, but safe)
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS daily_summary (
-            date TEXT PRIMARY KEY,
-            total_outstanding_begin REAL,
-            fresh_exposure REAL,
-            exposure_liquidated REAL,
-            net_outstanding_end REAL
-        )
-        """)
+    conn = get_connection()
+    with open(SCHEMA_PATH, "r") as f:
+        # DuckDB supports most SQLite syntax, but we might need to adjust slightly
+        # For now, assuming schema.sql is compatible
+        conn.sql(f.read())
+    # Ensure daily_summary table exists (redundant if in schema.sql, but safe)
+    conn.sql("""
+    CREATE TABLE IF NOT EXISTS daily_summary (
+        date DATE PRIMARY KEY,
+        total_outstanding_begin DOUBLE,
+        fresh_exposure DOUBLE,
+        exposure_liquidated DOUBLE,
+        net_outstanding_end DOUBLE
+    )
+    """)
 
 
 def parse_and_insert(csv_path: str, date_str: str):
@@ -65,22 +67,17 @@ def parse_and_insert(csv_path: str, date_str: str):
 
     # Insert summary if found
     if summary:
-        summary["date"] = date_str
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO daily_summary
-                (date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    summary["date"],
-                    summary.get("total_outstanding_begin"),
-                    summary.get("fresh_exposure"),
-                    summary.get("exposure_liquidated"),
-                    summary.get("net_outstanding_end"),
-                ),
-            )
+        summary["date"] = pd.to_datetime(date_str).date()
+        conn = get_connection()
+        # Create a localized DataFrame for insertion
+        df_summary = pd.DataFrame([summary])
+        # Explicit column selection to match table definition
+        conn.sql("""
+            INSERT OR REPLACE INTO daily_summary 
+            (date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end)
+            SELECT date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end 
+            FROM df_summary
+        """)
 
     # Read stock data
     df = pd.read_csv(csv_path, skiprows=header_idx)
@@ -92,7 +89,7 @@ def parse_and_insert(csv_path: str, date_str: str):
             "Amt Fin by all the members(Rs. In Lakhs)": "amt_financed",
         }
     )
-    df["date"] = date_str
+    df["date"] = pd.to_datetime(date_str).date()
 
     # Keep only rows where all required fields are present and not null/empty
     required_cols = ["symbol", "name", "qty_financed", "amt_financed"]
@@ -101,48 +98,61 @@ def parse_and_insert(csv_path: str, date_str: str):
     df = df[df[required_cols].map(lambda x: str(x).strip() != "").all(axis=1)]
 
     # Insert/Get stock_ids
-    with sqlite3.connect(DB_PATH) as conn:
-        unique_symbols = df[["symbol", "name"]].drop_duplicates()
-        symbol_to_id = {}
+    conn = get_connection()
+    unique_symbols = df[["symbol", "name"]].drop_duplicates()
 
-        # 1. Ensure all symbols are in stock_master and get their IDs
-        for _, row in unique_symbols.iterrows():
-            symbol = row["symbol"]
-            name = row["name"]
+    # 1. Update stock_master with new symbols
+    # DuckDB efficient merge/upsert
+    # First, ensure stock_master has all symbols
+    
+    # We need to fetch industry for new symbols. This is slow loop, but better logic:
+    # Identify symbols NOT in stock_master
+    existing_symbols_df = conn.sql("SELECT symbol FROM stock_master").df()
+    existing_symbols = set(existing_symbols_df["symbol"]) if not existing_symbols_df.empty else set()
+    
+    new_symbols_df = unique_symbols[~unique_symbols["symbol"].isin(existing_symbols)].copy()
+    
+    if not new_symbols_df.empty:
+        print(f"Found {len(new_symbols_df)} new symbols. Fetching industries...")
+        industries = []
+        for symbol in new_symbols_df["symbol"]:
+            try:
+                meta = nse.equityMetaInfo(symbol)
+                industry = meta.get("industry", None)
+            except Exception:
+                industry = None
+            industries.append(industry)
+        new_symbols_df["industry"] = industries
+        
+        # Insert new symbols into stock_master
+        # Note: stock_id is AUTOINCREMENT, so we just insert other columns
+        # But DuckDB 'INSERT INTO ... SELECT' doesn't easily return IDs for mapping in one go without RETURNING
+        # However, for the 'stock_data' table, we need 'stock_id'. 
+        # Strategy: Insert new, then Select ALL to create the map.
+        conn.sql("INSERT INTO stock_master (symbol, name, industry) SELECT symbol, name, industry FROM new_symbols_df")
+        print(f"Inserted {len(new_symbols_df)} new symbols.")
 
-            # Check if exists and get ID
-            cur = conn.execute(
-                "SELECT stock_id FROM stock_master WHERE symbol = ?", (symbol,)
-            )
-            res = cur.fetchone()
-
-            if res:
-                stock_id = res[0]
-            else:
-                # Need to insert
-                try:
-                    meta = nse.equityMetaInfo(symbol)
-                    industry = meta.get("industry", None)
-                except Exception:
-                    industry = None
-
-                cur = conn.execute(
-                    "INSERT INTO stock_master (symbol, name, industry) VALUES (?, ?, ?)",
-                    (symbol, name, industry),
-                )
-                stock_id = cur.lastrowid
-                print(
-                    f"Inserted {symbol} into stock_master with industry {industry}, ID: {stock_id}"
-                )
-
-            symbol_to_id[symbol] = stock_id
-
-        # 2. Map symbols to IDs in the dataframe
-        df["stock_id"] = df["symbol"].map(symbol_to_id)
-
-        # 3. Insert daily data using stock_id
-        df_daily = df[["date", "stock_id", "qty_financed", "amt_financed"]]
-        df_daily.to_sql("stock_data", conn, if_exists="append", index=False)
+    # 2. Map symbols to IDs
+    # Read full master table to get IDs
+    # Creating a map inside DuckDB or in Memory? DuckDB Join is better.
+    
+    # Let's do the join in DuckDB for insertion!
+    # stock_data needs: date, stock_id, qty_financed, amt_financed
+    
+    # Register the dataframe so SQL can see it
+    conn.register("df_staging", df)
+    
+    conn.sql("""
+        INSERT INTO stock_data (date, stock_id, qty_financed, amt_financed)
+        SELECT 
+            d.date,
+            m.stock_id,
+            d.qty_financed,
+            d.amt_financed
+        FROM df_staging d
+        JOIN stock_master m ON d.symbol = m.symbol
+    """)
+        
     # Delete the CSV file after processing
     try:
         Path(csv_path).unlink()
@@ -158,9 +168,15 @@ def download_and_store_range(from_date: date, to_date: date):
     """
     create_table()
     # Get all dates present in DB
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("SELECT DISTINCT date FROM stock_data")
-        db_dates = set(pd.to_datetime([row[0] for row in cur.fetchall()]).date)
+    conn = get_connection()
+    # Check if table has data first to avoid error
+    try:
+        res = conn.sql("SELECT DISTINCT date FROM stock_data").fetchall()
+        db_dates = set([row[0] for row in res])
+    except duckdb.CatalogException: # Table might not exist or be empty behavior
+            db_dates = set()
+    except Exception:
+            db_dates = set()
 
     # Prepare all dates in the range
     all_dates = [
@@ -195,13 +211,15 @@ def download_and_store_range(from_date: date, to_date: date):
 def update_to_today():
     """Calculates the missing range (Last DB Date -> Today) and runs the download."""
     create_table()
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute("SELECT MAX(date) FROM stock_data")
-        row = cur.fetchone()
-        last_date_str = row[0]
+    conn = get_connection()
+    try:
+        row = conn.sql("SELECT MAX(date) FROM stock_data").fetchone()
+        last_date = row[0] if row else None
+    except Exception:
+        last_date = None
 
-    if last_date_str:
-        last_date = pd.to_datetime(last_date_str).date()
+    if last_date:
+        # last_date is datetime.date object in DuckDB
         from_date = last_date + timedelta(days=1)
     else:
         # Default to 30 days ago if DB is empty
@@ -215,3 +233,80 @@ def update_to_today():
 
     print(f"Updating database from {from_date} to {to_date}")
     download_and_store_range(from_date, to_date)
+
+
+def migrate_legacy_data():
+    """Migrates data from legacy SQLite DB if it exists and DuckDB is empty."""
+    import os
+    sqlite_db_path = "./db/stock_data.db"
+    if not os.path.exists(sqlite_db_path):
+        return
+
+    conn = get_connection()
+    try:
+        # Check if we already have meaningful data
+        # If count is small (e.g. from tests), we might still want to migrate?
+        # But merging is hard. Let's assume if < 100 rows, it's just test data and we can WIPE it and migrate.
+        count = conn.sql("SELECT count(*) FROM stock_master").fetchone()[0]
+        if count > 100:
+            return # Already has substantial data
+
+        print("Migrating legacy data from SQLite...")
+        
+        # If we are migrating, we should probably clear any test data first to avoid ID conflicts
+        if count > 0:
+            print("Clearing existing (test) data before migration...")
+            conn.execute("DELETE FROM stock_data")
+            conn.execute("DELETE FROM daily_summary")
+            conn.execute("DELETE FROM stock_master")
+            # Create fresh sequence
+            try:
+                conn.execute("DROP SEQUENCE IF EXISTS stock_id_seq")
+                conn.execute("CREATE SEQUENCE stock_id_seq START 1")
+            except:
+                pass
+        
+        # Install/Load sqlite extension
+        conn.execute("INSTALL sqlite; LOAD sqlite;")
+        
+        # Attach
+        conn.execute(f"ATTACH '{sqlite_db_path}' AS sqlite_db (TYPE SQLITE);")
+        
+        # 1. Stock Master
+        conn.execute("INSERT INTO stock_master SELECT * FROM sqlite_db.stock_master")
+        # Reset Sequence
+        row = conn.execute("SELECT MAX(stock_id) FROM stock_master").fetchone()
+        max_id = row[0] if row else 0
+        try:
+            conn.execute(f"ALTER SEQUENCE stock_id_seq RESTART WITH {max_id + 1}")
+        except Exception as e:
+            print(f"Warning: Could not reset sequence: {e}")
+
+        # 2. Daily Summary
+        conn.execute("""
+            INSERT INTO daily_summary 
+            SELECT 
+                CAST(date AS DATE), 
+                total_outstanding_begin, 
+                fresh_exposure, 
+                exposure_liquidated, 
+                net_outstanding_end 
+            FROM sqlite_db.daily_summary
+        """)
+        
+        # 3. Stock Data
+        conn.execute("""
+            INSERT INTO stock_data 
+            SELECT 
+                CAST(date AS DATE), 
+                stock_id, 
+                CAST(qty_financed AS DOUBLE), 
+                CAST(amt_financed AS DOUBLE) 
+            FROM sqlite_db.stock_data
+        """)
+        
+        conn.execute("DETACH sqlite_db")
+        print("Legacy migration complete.")
+        
+    except Exception as e:
+        print(f"Error during migration: {e}")

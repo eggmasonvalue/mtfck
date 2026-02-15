@@ -1,5 +1,6 @@
+CREATE SEQUENCE IF NOT EXISTS stock_id_seq;
 CREATE TABLE IF NOT EXISTS stock_master (
-    stock_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stock_id INTEGER PRIMARY KEY DEFAULT nextval('stock_id_seq'),
     symbol TEXT UNIQUE,
     name TEXT,
     industry TEXT
