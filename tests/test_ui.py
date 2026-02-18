@@ -26,23 +26,23 @@ def streamlit_app():
         ["uv", "run", "streamlit", "run", "app.py", "--server.port", "8502", "--server.headless", "true"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        preexec_fn=os.setsid # To kill the process group later
     )
 
     url = "http://localhost:8502"
 
     if not wait_for_server(url):
         # Print stderr if failed
+        # Use terminate() which works on Windows too
+        process.terminate()
         stdout, stderr = process.communicate()
         print(f"Streamlit stdout: {stdout.decode()}")
         print(f"Streamlit stderr: {stderr.decode()}")
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         pytest.fail("Streamlit app failed to start")
 
     yield url
 
     # Cleanup
-    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    process.terminate()
     process.wait()
 
 def test_app_loads(page: Page, streamlit_app):
