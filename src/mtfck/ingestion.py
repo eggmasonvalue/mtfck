@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from pathlib import Path
+import time
 import duckdb
 import pandas as pd
 from nse import NSE
