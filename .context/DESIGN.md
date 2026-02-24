@@ -2,7 +2,7 @@
 
 ## Current Status
 - [x] Dashboard UI (Streamlit)
-- [x] SQLite Integration
+- [x] DuckDB Integration (Submodule)
 - [x] Data Fetching (NSE Archives)
 - [x] Trend Analysis
 - [x] Exposure Calculation

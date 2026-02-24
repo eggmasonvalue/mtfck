@@ -1,13 +1,17 @@
 from datetime import date, timedelta
 from pathlib import Path
+import time
 import duckdb
 import pandas as pd
 from nse import NSE
 from .db import get_connection, DB_PATH, close_connection
+import csv
+import io
+import requests
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
-SCHEMA_PATH = "./db/schema.sql"
+SCHEMA_PATH = "./mtf_data/schema.sql"
 
 nse = NSE(download_folder=DATA_DIR)
 
@@ -208,8 +212,157 @@ def download_and_store_range(from_date: date, to_date: date):
             print(f"Failed for {d}: {e}")
 
 
+def process_symbol_changes():
+    """
+    Download and process symbol changes from NSE.
+    Handles renaming and merging of stock data.
+    """
+    print("Checking for symbol changes...")
+    url = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
+    try:
+        # User-Agent might be needed to avoid blocking
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        # Decode using ISO-8859-1 (common for NSE/legacy systems) or utf-8 with replace
+        content = response.content.decode('ISO-8859-1')
+    except Exception as e:
+        print(f"Failed to download symbol change CSV: {e}")
+        return
+
+    csv_reader = csv.reader(io.StringIO(content))
+    changes = []
+    
+    # Try to find header
+    header_idx = -1
+    rows = list(csv_reader)
+    
+    for i, row in enumerate(rows):
+        if len(row) >= 3 and "Old Symbol" in str(row) and "New Symbol" in str(row):
+            header_idx = i
+            break
+            
+    if header_idx == -1:
+        # Fallback: assume data starts after some lines, or just try to parse all
+        # Logic: Look for lines with 4 columns where col 3 is date-like
+        start_idx = 0
+    else:
+        start_idx = header_idx + 1
+        
+    for row in rows[start_idx:]:
+        if len(row) < 3: continue
+        # CSV Format: Company Name, Old Symbol, New Symbol, Change Date
+        old_sym = row[1].strip()
+        new_sym = row[2].strip()
+        if not old_sym or not new_sym: continue
+        changes.append((old_sym, new_sym))
+        
+    if not changes:
+        print("No symbol changes found.")
+        return
+
+    conn = get_connection()
+    
+    # 1. Identify relevant changes (Old Symbol in DB)
+    # Fetch all current symbols
+    try:
+        existing_symbols_df = conn.sql("SELECT stock_id, symbol, name, industry FROM stock_master").df()
+    except Exception:
+        return # DB might be empty
+
+    if existing_symbols_df.empty:
+        return
+
+    # Map symbol -> row (dict) for quick lookup
+    symbol_map = {row['symbol']: row.to_dict() for _, row in existing_symbols_df.iterrows()}
+    
+    count_renamed = 0
+    count_merged = 0
+    
+    for old_sym, new_sym in changes:
+        if old_sym not in symbol_map:
+            continue
+            
+        old_row = symbol_map[old_sym]
+        old_id = old_row['stock_id']
+        
+        # Determine Target ID (New Symbol)
+        if new_sym in symbol_map:
+            # Target exists -> Merge
+            new_id = symbol_map[new_sym]['stock_id']
+            print(f"Merging {old_sym} (ID: {old_id}) into existing {new_sym} (ID: {new_id})")
+            count_merged += 1
+        else:
+            # Target does not exist -> Create new master entry
+            # Use name/industry from old symbol if available
+            name = old_row['name']
+            industry = old_row['industry']
+            
+            print(f"Renaming {old_sym} (ID: {old_id}) -> {new_sym} (New Entry)")
+            
+            # Insert new symbol
+            # Note: Parameter logic for connection.execute varies. Using f-string for simplicity/speed safely here as symbols are trusted?
+            # Or assume parameterized query works with execute.
+            conn.execute("INSERT INTO stock_master (symbol, name, industry) VALUES (?, ?, ?)", [new_sym, name, industry])
+            
+            # Fetch the new ID
+            # Assuming uniqueness of symbol, verify it was inserted
+            try:
+                new_id = conn.sql(f"SELECT stock_id FROM stock_master WHERE symbol = '{new_sym}'").fetchone()[0]
+                # Update local map for chain updates
+                symbol_map[new_sym] = {'stock_id': new_id, 'symbol': new_sym, 'name': name, 'industry': industry}
+                count_renamed += 1
+            except Exception as e:
+                print(f"Error inserting new symbol {new_sym}: {e}")
+                continue
+
+        # Common Relink Logic (Move Old ID data to New ID)
+        
+        # 1. Update IDs in stock_data for non-conflicting dates
+        query_update = f"""
+            UPDATE stock_data 
+            SET stock_id = {new_id} 
+            WHERE stock_id = {old_id} 
+            AND date NOT IN (SELECT date FROM stock_data WHERE stock_id = {new_id})
+        """
+        conn.execute(query_update)
+        
+        # 2. Delete remaining rows for old_id (collisions, we keep new_id's data)
+        conn.execute(f"DELETE FROM stock_data WHERE stock_id = {old_id}")
+        
+        # 3. Delete from stock_master (Old Symbol)
+        # Verify no constraints block this? Now stock_data for old_id is GONE.
+        try:
+            conn.execute(f"DELETE FROM stock_master WHERE stock_id = {old_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete old master record for {old_sym} (ID {old_id}): {e}")
+        
+        # Remove from local map
+        if old_sym in symbol_map:
+            del symbol_map[old_sym]
+
+    if count_renamed > 0 or count_merged > 0:
+        print(f"Symbol changes processed: {count_renamed} renamed, {count_merged} merged.")
+        
+    # Post-clean: Fetch industries for symbols with NULL industry
+    # This might happen if we just renamed and didn't have industry, or if merge happend
+    # Actually, verify if any industry is NULL
+    null_ind_df = conn.sql("SELECT symbol FROM stock_master WHERE industry IS NULL").df()
+    if not null_ind_df.empty:
+        print(f"Fetching missing industries for {len(null_ind_df)} symbols...")
+        for sym in null_ind_df['symbol']:
+            try:
+                meta = nse.equityMetaInfo(sym)
+                ind = meta.get('industry', None)
+                if ind:
+                    conn.execute("UPDATE stock_master SET industry = ? WHERE symbol = ?", [ind, sym])
+            except Exception:
+                pass
+
+
 def update_to_today():
     """Calculates the missing range (Last DB Date -> Today) and runs the download."""
+    process_symbol_changes()
     create_table()
     conn = get_connection()
     try:

@@ -1,0 +1,5 @@
+[submodule "mtf_data"]
+        path = mtf_data
+        url = git@github.com:eggmasonvalue/MTFDB.git
+        branch = main
+
