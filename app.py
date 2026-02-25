@@ -75,9 +75,9 @@ def get_unique_industries(industry_data):
             basic_industry = details[-1]
             hierarchy = " > ".join(details[:-1]) if len(details) > 1 else "Unknown"
             
-            # Pad with 80 non-breaking spaces to push hierarchy out of view
+            # Pad with 60 non-breaking spaces to push hierarchy out of view
             # Streamlit truncates the view, but keeps it searchable and visible on hover tooltip
-            padding = chr(160) * 80 
+            padding = chr(160) * 60 
             formatted_string = f"{basic_industry}{padding}[{hierarchy}]"
             industries.add(formatted_string)
     return sorted(list(industries))
@@ -86,7 +86,7 @@ def get_unique_industries(industry_data):
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
 st.markdown(
     """
-    <h1 style='text-align: center; font-family: "Impact"; font-size: 3em; font-weight: bold; color: orange; margin-bottom: 0.5em; letter-spacing: 0.05em;'>
+    <h1 style='text-align: center; font-family: "Impact"; font-size: 3em; font-weight: bold; color: blue; margin-bottom: 0.5em; letter-spacing: 0.05em;'>
         MTFCK!
     </h1>
     """,
@@ -133,7 +133,7 @@ with st.sidebar:
     )
     
     top_n = st.slider(
-        "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
+        "Number of Top Stocks", min_value=3, max_value=20, value=5, step=1
     )
     
     industries = get_unique_industries(industry_data)
