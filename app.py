@@ -72,13 +72,11 @@ def get_unique_industries(industry_data):
     industries = set()
     for _, details in industry_data.items():
         if isinstance(details, list) and len(details) > 0:
-            # Create a 2-tier format using newlines. The CSS we inject will handle the wrapping.
-            # details typically looks like: [Macro, Sector, Industry, Basic Industry]
             basic_industry = details[-1]
             hierarchy = " > ".join(details[:-1]) if len(details) > 1 else "Unknown"
             
-            # Use upper case for emphasis on the first line
-            formatted_string = f"{basic_industry.upper()}\n└ {hierarchy}"
+            # Use a clean single-line format: Basic Industry [Hierarchy]
+            formatted_string = f"{basic_industry} [{hierarchy}]"
             industries.add(formatted_string)
     return sorted(list(industries))
 
@@ -86,25 +84,6 @@ def get_unique_industries(industry_data):
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
 st.markdown(
     """
-    <style>
-    /* Wrap text for SELECTED options (the tags) */
-    .stMultiSelect [data-baseweb="tag"] {
-        height: auto !important;
-    }
-    .stMultiSelect [data-baseweb="tag"] span {
-        white-space: pre-wrap !important;
-        overflow-wrap: anywhere !important;
-    }
-    /* Wrap text for options in the DROPDOWN menu */
-    [data-baseweb="popover"] li {
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
-        line-height: 1.4 !important;
-        padding-top: 8px !important;
-        padding-bottom: 8px !important;
-        border-bottom: 1px solid #f0f0f0;
-    }
-    </style>
     <h1 style='text-align: center; font-family: "Impact"; font-size: 3em; font-weight: bold; color: orange; margin-bottom: 0.5em; letter-spacing: 0.05em;'>
         MTFCK!
     </h1>
