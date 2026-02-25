@@ -420,7 +420,7 @@ if show_trend_clicked:
         curr_from = pd.to_datetime(from_date_db).date()
         end_to = pd.to_datetime(to_date_db).date()
         while curr_from <= end_to:
-            curr_to = min(curr_from + timedelta(days=300), end_to)
+            curr_to = min(curr_from + timedelta(days=90), end_to)
             try:
                 chunk = nse.fetch_equity_historical_data(
                     trend_symbol_input,
@@ -516,7 +516,7 @@ if show_net_outstanding_clicked:
             curr_from = pd.to_datetime(df_chart["date"].min()).date()
             end_to = pd.to_datetime(df_chart["date"].max()).date()
             while curr_from <= end_to:
-                curr_to = min(curr_from + timedelta(days=300), end_to)
+                curr_to = min(curr_from + timedelta(days=90), end_to)
                 chunk = nse.fetch_historical_index_data(
                     index="NIFTY TOTAL MARKET",
                     from_date=curr_from,
