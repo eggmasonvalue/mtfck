@@ -68,17 +68,35 @@ def get_available_dates():
 
 
 def get_unique_industries(industry_data):
-    """Extract unique industries from the JSON dataset."""
+    """Extract unique industries from the JSON dataset and format them for display."""
     industries = set()
     for _, details in industry_data.items():
         if isinstance(details, list) and len(details) > 0:
-            industries.add(" > ".join(details))
+            # Create a 2-tier format using newlines. The CSS we inject will handle the wrapping.
+            # details typically looks like: [Macro, Sector, Industry, Basic Industry]
+            basic_industry = details[-1]
+            hierarchy = " > ".join(details[:-1]) if len(details) > 1 else "Unknown"
+            
+            # Use upper case for emphasis on the first line
+            formatted_string = f"{basic_industry.upper()}\n└ {hierarchy}"
+            industries.add(formatted_string)
     return sorted(list(industries))
 
 
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
 st.markdown(
     """
+    <style>
+    /* Make multiselect dropdown text wrap and support newlines */
+    div[data-baseweb="select"] ul[role="listbox"] li {
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        line-height: 1.4 !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    </style>
     <h1 style='text-align: center; font-family: "Impact"; font-size: 3em; font-weight: bold; color: orange; margin-bottom: 0.5em; letter-spacing: 0.05em;'>
         MTFCK!
     </h1>
@@ -90,13 +108,32 @@ industry_data = get_cached_industry_data()
 
 # --- Sidebar Controls ---
 with st.sidebar:
+    st.header("Database Sync")
+    
+    # Check sync status
+    db_path = "mtf_data/stock_data.parquet"
+    if os.path.exists(db_path):
+        mtime = os.path.getmtime(db_path)
+        last_synced = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %I:%M %p')
+        st.caption(f"Last Synced: {last_synced}")
+    else:
+        st.caption("Database not downloaded yet.")
+
+    sync_clicked = st.button("Sync Database from Cloud", width="stretch")
+    if sync_clicked:
+        download_database()
+        st.rerun()
+
+    st.markdown("---")
     st.header("Analysis Controls")
+    
     dates = get_available_dates()
     if dates:
         min_date = min(dates)
         max_date = max(dates)
     else:
         min_date = max_date = date.today().strftime("%Y-%m-%d")
+        
     from_date = st.date_input(
         "From Date",
         value=datetime.strptime(str(min_date), "%Y-%m-%d").date(),
@@ -105,11 +142,7 @@ with st.sidebar:
     to_date = st.date_input(
         "To Date", value=datetime.strptime(str(max_date), "%Y-%m-%d").date(), key="to_date"
     )
-    sync_clicked = st.button("Sync Database from Cloud", width="stretch")
-    if sync_clicked:
-        download_database()
-        st.rerun()
-
+    
     top_n = st.slider(
         "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
     )
@@ -436,10 +469,8 @@ if show_trend_clicked:
 
         if price_data:
             price_df = pd.DataFrame(price_data)
-            timestamp_col = (
-                "mTIMESTAMP" if "mTIMESTAMP" in price_df.columns else "CH_TIMESTAMP"
-            )
-            closing_col = "CH_CLOSING_PRICE"
+            timestamp_col = "mtimestamp" if "mtimestamp" in price_df.columns else "CH_TIMESTAMP"
+            closing_col = "chClosingPrice" if "chClosingPrice" in price_df.columns else "CH_CLOSING_PRICE"
 
             if timestamp_col in price_df.columns and closing_col in price_df.columns:
                 price_df["date"] = pd.to_datetime(
@@ -450,7 +481,7 @@ if show_trend_clicked:
                 fig.add_trace(
                     go.Scatter(
                         x=price_df["date"],
-                        y=price_df["CH_CLOSING_PRICE"],
+                        y=price_df[closing_col],
                         mode="lines+markers",
                         name="Closing Price",
                         line=dict(color="orange", width=2, dash="dot"),
