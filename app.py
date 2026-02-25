@@ -5,7 +5,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from mtfck.db import get_connection
 from mtfck.mtfck import (
     download_and_store_range,
@@ -81,7 +81,7 @@ with st.sidebar:
         "To Date", value=datetime.strptime(str(max_date), "%Y-%m-%d").date(), key="to_date"
     )
     fetch_clicked = st.button(
-        "Fetch/Update Data for Selected Range", use_container_width=True
+        "Fetch/Update Data for Selected Range", width="stretch"
     )
     top_n = st.slider(
         "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
@@ -105,7 +105,7 @@ with st.sidebar:
         st.warning(
             "For Exposure % analysis, please choose one or more industry filters to avoid long load time."
         )
-    run_analysis = st.button("Run Analysis", use_container_width=True)
+    run_analysis = st.button("Run Analysis", width="stretch")
     st.markdown("---")
 
     # --- Trends Section ---
@@ -427,11 +427,23 @@ if show_trend_clicked:
             )
         )
 
-        price_data = nse.fetch_equity_historical_data(
-            trend_symbol_input,
-            from_date=pd.to_datetime(from_date_db).date(),
-            to_date=pd.to_datetime(to_date_db).date(),
-        )
+        price_data = []
+        curr_from = pd.to_datetime(from_date_db).date()
+        end_to = pd.to_datetime(to_date_db).date()
+        while curr_from <= end_to:
+            curr_to = min(curr_from + timedelta(days=300), end_to)
+            try:
+                chunk = nse.fetch_equity_historical_data(
+                    trend_symbol_input,
+                    from_date=curr_from,
+                    to_date=curr_to,
+                )
+                if isinstance(chunk, list):
+                    price_data.extend(chunk)
+            except Exception:
+                pass
+            curr_from = curr_to + timedelta(days=1)
+
         if price_data:
             price_df = pd.DataFrame(price_data)
             timestamp_col = (
@@ -510,16 +522,22 @@ if show_net_outstanding_clicked:
             )
         )
 
+        price_list = []
         try:
-            index_data = nse.fetch_historical_index_data(
-                index="NIFTY TOTAL MARKET",
-                from_date=pd.to_datetime(df_chart["date"].min()).date(),
-                to_date=pd.to_datetime(df_chart["date"].max()).date(),
-            )
-            price_list = index_data if isinstance(index_data, list) else []
+            curr_from = pd.to_datetime(df_chart["date"].min()).date()
+            end_to = pd.to_datetime(df_chart["date"].max()).date()
+            while curr_from <= end_to:
+                curr_to = min(curr_from + timedelta(days=300), end_to)
+                chunk = nse.fetch_historical_index_data(
+                    index="NIFTY TOTAL MARKET",
+                    from_date=curr_from,
+                    to_date=curr_to,
+                )
+                if isinstance(chunk, list):
+                    price_list.extend(chunk)
+                curr_from = curr_to + timedelta(days=1)
         except Exception as e:
             print(f"Error fetching index data: {e}")
-            price_list = []
 
         price_df = pd.DataFrame(price_list)
         if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
