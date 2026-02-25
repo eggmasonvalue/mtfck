@@ -10,7 +10,6 @@ import requests
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
-SCHEMA_PATH = "./mtf_data/schema.sql"
 
 nse = NSE(download_folder=DATA_DIR)
 
@@ -18,11 +17,9 @@ nse = NSE(download_folder=DATA_DIR)
 def create_table() -> None:
     """
     Ensure required tables exist in the database.
-    Executes the schema definition from the associated SQL file.
+    Since we use in-memory DuckDB with Parquet, table creation is handled by get_connection().
     """
-    conn = get_connection(read_only=False)
-    with open(SCHEMA_PATH, "r") as f:
-        conn.sql(f.read())
+    get_connection(read_only=False)
 
 
 def parse_and_insert(csv_path: str, date_str: str) -> None:

@@ -9,7 +9,6 @@ from .db import get_connection, DB_PATH
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
-SCHEMA_PATH = "./db/schema.sql"
 
 nse = NSE(download_folder=DATA_DIR)
 
