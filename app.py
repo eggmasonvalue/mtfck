@@ -46,8 +46,8 @@ def get_unique_industries(industry_data):
     """Extract unique industries from the JSON dataset."""
     industries = set()
     for _, details in industry_data.items():
-        if isinstance(details, list) and len(details) > 2:
-            industries.add(details[2])
+        if isinstance(details, list) and len(details) > 0:
+            industries.add(" > ".join(details))
     return sorted(list(industries))
 
 
@@ -146,13 +146,16 @@ def ensure_data_in_db(from_date, to_date):
         try:
             download_and_store_range(from_date, to_date)
             st.success("Data updated!")
+            return True
         except Exception as e:
             st.error(f"Error updating data: {e}")
+            return False
+    return True
 
 
 if fetch_clicked:
-    ensure_data_in_db(from_date, to_date)
-    st.rerun()
+    if ensure_data_in_db(from_date, to_date):
+        st.rerun()
 
 
 # --- Trend Analysis Logic ---

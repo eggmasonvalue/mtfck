@@ -83,11 +83,15 @@ def calculate_returns(symbol, to_date, from_date=None):
 
 def _apply_industry(df: pd.DataFrame, industry_data: dict) -> pd.DataFrame:
     if not df.empty and "symbol" in df.columns:
+        df["industry_path"] = df["symbol"].apply(
+            lambda x: " > ".join(industry_data.get(x)) if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 0 else "Unknown"
+        )
         df["industry"] = df["symbol"].apply(
-            lambda x: industry_data.get(x, ["", "", "Unknown"])[2] if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 2 else "Unknown"
+            lambda x: industry_data.get(x)[-1] if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 0 else "Unknown"
         )
     else:
         df["industry"] = pd.Series(dtype=str)
+        df["industry_path"] = pd.Series(dtype=str)
     return df
 
 
@@ -105,9 +109,10 @@ def get_top5_amt_financed(
         df = _apply_industry(df, industry_data)
     else:
         df["industry"] = "Unknown"
+        df["industry_path"] = "Unknown"
 
     if industries:
-        df = df[df["industry"].isin(industries)]
+        df = df[df["industry_path"].isin(industries)]
 
     df = df.sort_values("amt_financed", ascending=False).head(top_n)
 
@@ -162,9 +167,10 @@ def get_top5_amt_financed_pct_change(
         df = _apply_industry(df, industry_data)
     else:
         df["industry"] = "Unknown"
+        df["industry_path"] = "Unknown"
 
     if industries:
-        df = df[df["industry"].isin(industries)]
+        df = df[df["industry_path"].isin(industries)]
 
     df = df.sort_values("pct_change", ascending=False).head(top_n)
 
@@ -218,9 +224,10 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
         df_new = _apply_industry(df_new, industry_data)
     else:
         df_new["industry"] = "Unknown"
+        df_new["industry_path"] = "Unknown"
 
     if industries:
-        df_new = df_new[df_new["industry"].isin(industries)]
+        df_new = df_new[df_new["industry_path"].isin(industries)]
 
     ffmc_list = []
     exposure_pct_list = []
@@ -264,9 +271,10 @@ def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = Non
         df = _apply_industry(df, industry_data)
     else:
         df["industry"] = "Unknown"
+        df["industry_path"] = "Unknown"
 
     if industries:
-        df = df[df["industry"].isin(industries)]
+        df = df[df["industry_path"].isin(industries)]
 
     ffmc_list = []
     exposure_pct_list = []
