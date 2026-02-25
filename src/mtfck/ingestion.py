@@ -77,9 +77,9 @@ def parse_and_insert(csv_path: str, date_str: str):
         df_summary = pd.DataFrame([summary])
         # Explicit column selection to match table definition
         conn.sql("""
-            INSERT OR REPLACE INTO daily_summary 
+            INSERT OR REPLACE INTO daily_summary
             (date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end)
-            SELECT date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end 
+            SELECT date, total_outstanding_begin, fresh_exposure, exposure_liquidated, net_outstanding_end
             FROM df_summary
         """)
 
@@ -108,14 +108,14 @@ def parse_and_insert(csv_path: str, date_str: str):
     # 1. Update stock_master with new symbols
     # DuckDB efficient merge/upsert
     # First, ensure stock_master has all symbols
-    
+
     # We need to fetch industry for new symbols. This is slow loop, but better logic:
     # Identify symbols NOT in stock_master
     existing_symbols_df = conn.sql("SELECT symbol FROM stock_master").df()
     existing_symbols = set(existing_symbols_df["symbol"]) if not existing_symbols_df.empty else set()
-    
+
     new_symbols_df = unique_symbols[~unique_symbols["symbol"].isin(existing_symbols)].copy()
-    
+
     if not new_symbols_df.empty:
         print(f"Found {len(new_symbols_df)} new symbols. Fetching industries...")
         industries = []
@@ -127,11 +127,11 @@ def parse_and_insert(csv_path: str, date_str: str):
                 industry = None
             industries.append(industry)
         new_symbols_df["industry"] = industries
-        
+
         # Insert new symbols into stock_master
         # Note: stock_id is AUTOINCREMENT, so we just insert other columns
         # But DuckDB 'INSERT INTO ... SELECT' doesn't easily return IDs for mapping in one go without RETURNING
-        # However, for the 'stock_data' table, we need 'stock_id'. 
+        # However, for the 'stock_data' table, we need 'stock_id'.
         # Strategy: Insert new, then Select ALL to create the map.
         conn.sql("INSERT INTO stock_master (symbol, name, industry) SELECT symbol, name, industry FROM new_symbols_df")
         print(f"Inserted {len(new_symbols_df)} new symbols.")
@@ -139,16 +139,16 @@ def parse_and_insert(csv_path: str, date_str: str):
     # 2. Map symbols to IDs
     # Read full master table to get IDs
     # Creating a map inside DuckDB or in Memory? DuckDB Join is better.
-    
+
     # Let's do the join in DuckDB for insertion!
     # stock_data needs: date, stock_id, qty_financed, amt_financed
-    
+
     # Register the dataframe so SQL can see it
     conn.register("df_staging", df)
-    
+
     conn.sql("""
         INSERT INTO stock_data (date, stock_id, qty_financed, amt_financed)
-        SELECT 
+        SELECT
             d.date,
             m.stock_id,
             d.qty_financed,
@@ -156,7 +156,7 @@ def parse_and_insert(csv_path: str, date_str: str):
         FROM df_staging d
         JOIN stock_master m ON d.symbol = m.symbol
     """)
-        
+
     # Delete the CSV file after processing
     try:
         Path(csv_path).unlink()
@@ -232,23 +232,23 @@ def process_symbol_changes():
 
     csv_reader = csv.reader(io.StringIO(content))
     changes = []
-    
+
     # Try to find header
     header_idx = -1
     rows = list(csv_reader)
-    
+
     for i, row in enumerate(rows):
         if len(row) >= 3 and "Old Symbol" in str(row) and "New Symbol" in str(row):
             header_idx = i
             break
-            
+
     if header_idx == -1:
         # Fallback: assume data starts after some lines, or just try to parse all
         # Logic: Look for lines with 4 columns where col 3 is date-like
         start_idx = 0
     else:
         start_idx = header_idx + 1
-        
+
     for row in rows[start_idx:]:
         if len(row) < 3: continue
         # CSV Format: Company Name, Old Symbol, New Symbol, Change Date
@@ -256,13 +256,13 @@ def process_symbol_changes():
         new_sym = row[2].strip()
         if not old_sym or not new_sym: continue
         changes.append((old_sym, new_sym))
-        
+
     if not changes:
         print("No symbol changes found.")
         return
 
     conn = get_connection()
-    
+
     # 1. Identify relevant changes (Old Symbol in DB)
     # Fetch all current symbols
     try:
@@ -275,17 +275,17 @@ def process_symbol_changes():
 
     # Map symbol -> row (dict) for quick lookup
     symbol_map = {row['symbol']: row.to_dict() for _, row in existing_symbols_df.iterrows()}
-    
+
     count_renamed = 0
     count_merged = 0
-    
+
     for old_sym, new_sym in changes:
         if old_sym not in symbol_map:
             continue
-            
+
         old_row = symbol_map[old_sym]
         old_id = old_row['stock_id']
-        
+
         # Determine Target ID (New Symbol)
         if new_sym in symbol_map:
             # Target exists -> Merge
@@ -297,14 +297,14 @@ def process_symbol_changes():
             # Use name/industry from old symbol if available
             name = old_row['name']
             industry = old_row['industry']
-            
+
             print(f"Renaming {old_sym} (ID: {old_id}) -> {new_sym} (New Entry)")
-            
+
             # Insert new symbol
             # Note: Parameter logic for connection.execute varies. Using f-string for simplicity/speed safely here as symbols are trusted?
             # Or assume parameterized query works with execute.
             conn.execute("INSERT INTO stock_master (symbol, name, industry) VALUES (?, ?, ?)", [new_sym, name, industry])
-            
+
             # Fetch the new ID
             # Assuming uniqueness of symbol, verify it was inserted
             try:
@@ -317,33 +317,33 @@ def process_symbol_changes():
                 continue
 
         # Common Relink Logic (Move Old ID data to New ID)
-        
+
         # 1. Update IDs in stock_data for non-conflicting dates
         query_update = f"""
-            UPDATE stock_data 
-            SET stock_id = {new_id} 
-            WHERE stock_id = {old_id} 
+            UPDATE stock_data
+            SET stock_id = {new_id}
+            WHERE stock_id = {old_id}
             AND date NOT IN (SELECT date FROM stock_data WHERE stock_id = {new_id})
         """
         conn.execute(query_update)
-        
+
         # 2. Delete remaining rows for old_id (collisions, we keep new_id's data)
         conn.execute(f"DELETE FROM stock_data WHERE stock_id = {old_id}")
-        
+
         # 3. Delete from stock_master (Old Symbol)
         # Verify no constraints block this? Now stock_data for old_id is GONE.
         try:
             conn.execute(f"DELETE FROM stock_master WHERE stock_id = {old_id}")
         except Exception as e:
             print(f"Warning: Could not delete old master record for {old_sym} (ID {old_id}): {e}")
-        
+
         # Remove from local map
         if old_sym in symbol_map:
             del symbol_map[old_sym]
 
     if count_renamed > 0 or count_merged > 0:
         print(f"Symbol changes processed: {count_renamed} renamed, {count_merged} merged.")
-        
+
     # Post-clean: Fetch industries for symbols with NULL industry
     # This might happen if we just renamed and didn't have industry, or if merge happend
     # Actually, verify if any industry is NULL
@@ -360,10 +360,45 @@ def process_symbol_changes():
                 pass
 
 
+def sync_sequence():
+    """Ensure stock_id_seq is consistent with stock_master.stock_id."""
+    conn = get_connection()
+    try:
+        # Check if table exists
+        conn.execute("SELECT 1 FROM stock_master LIMIT 1")
+    except duckdb.CatalogException:
+        return # Table doesn't exist yet, nothing to sync
+    except Exception:
+        return
+
+    # Get Max ID
+    row = conn.execute("SELECT MAX(stock_id) FROM stock_master").fetchone()
+    max_id = row[0] if row and row[0] is not None else 0
+
+    # Sync sequence
+    try:
+        seq_info = conn.execute("SELECT last_value FROM duckdb_sequences() WHERE sequence_name='stock_id_seq'").fetchone()
+        if seq_info:
+            current_val = seq_info[0] if seq_info[0] is not None else 0
+            if current_val < max_id:
+                diff = max_id - current_val
+                print(f"Syncing sequence: lagging by {diff}. Fast-forwarding...")
+                # Use nextval loop as ALTER SEQUENCE RESTART is not supported in some versions
+                conn.execute(f"SELECT nextval('stock_id_seq') FROM range({diff})")
+                print(f"Sequence fast-forwarded to > {max_id}")
+    except Exception as e:
+        print(f"Warning: Could not sync sequence: {e}")
+
+
 def update_to_today():
     """Calculates the missing range (Last DB Date -> Today) and runs the download."""
-    process_symbol_changes()
     create_table()
+
+    # Ensure sequence is synced before we do anything that might rely on it for new inserts
+    sync_sequence()
+
+    process_symbol_changes()
+
     conn = get_connection()
     try:
         row = conn.sql("SELECT MAX(date) FROM stock_data").fetchone()
@@ -405,7 +440,7 @@ def migrate_legacy_data():
             return # Already has substantial data
 
         print("Migrating legacy data from SQLite...")
-        
+
         # If we are migrating, we should probably clear any test data first to avoid ID conflicts
         if count > 0:
             print("Clearing existing (test) data before migration...")
@@ -418,48 +453,46 @@ def migrate_legacy_data():
                 conn.execute("CREATE SEQUENCE stock_id_seq START 1")
             except:
                 pass
-        
+
         # Install/Load sqlite extension
         conn.execute("INSTALL sqlite; LOAD sqlite;")
-        
+
         # Attach
         conn.execute(f"ATTACH '{sqlite_db_path}' AS sqlite_db (TYPE SQLITE);")
-        
+
         # 1. Stock Master
         conn.execute("INSERT INTO stock_master SELECT * FROM sqlite_db.stock_master")
         # Reset Sequence
-        row = conn.execute("SELECT MAX(stock_id) FROM stock_master").fetchone()
-        max_id = row[0] if row else 0
-        try:
-            conn.execute(f"ALTER SEQUENCE stock_id_seq RESTART WITH {max_id + 1}")
-        except Exception as e:
-            print(f"Warning: Could not reset sequence: {e}")
+        sync_sequence()
 
         # 2. Daily Summary
         conn.execute("""
-            INSERT INTO daily_summary 
-            SELECT 
-                CAST(date AS DATE), 
-                total_outstanding_begin, 
-                fresh_exposure, 
-                exposure_liquidated, 
-                net_outstanding_end 
+            INSERT INTO daily_summary
+            SELECT
+                CAST(date AS DATE),
+                total_outstanding_begin,
+                fresh_exposure,
+                exposure_liquidated,
+                net_outstanding_end
             FROM sqlite_db.daily_summary
         """)
-        
+
         # 3. Stock Data
         conn.execute("""
-            INSERT INTO stock_data 
-            SELECT 
-                CAST(date AS DATE), 
-                stock_id, 
-                CAST(qty_financed AS DOUBLE), 
-                CAST(amt_financed AS DOUBLE) 
+            INSERT INTO stock_data
+            SELECT
+                CAST(date AS DATE),
+                stock_id,
+                CAST(qty_financed AS DOUBLE),
+                CAST(amt_financed AS DOUBLE)
             FROM sqlite_db.stock_data
         """)
-        
+
         conn.execute("DETACH sqlite_db")
         print("Legacy migration complete.")
-        
+
     except Exception as e:
         print(f"Error during migration: {e}")
+
+if __name__ == "__main__":
+    update_to_today()
