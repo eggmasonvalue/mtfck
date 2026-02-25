@@ -87,8 +87,16 @@ st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
 st.markdown(
     """
     <style>
-    /* Make multiselect dropdown text wrap and support newlines */
-    div[data-baseweb="select"] ul[role="listbox"] li {
+    /* Wrap text for SELECTED options (the tags) */
+    .stMultiSelect [data-baseweb="tag"] {
+        height: auto !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] span {
+        white-space: pre-wrap !important;
+        overflow-wrap: anywhere !important;
+    }
+    /* Wrap text for options in the DROPDOWN menu */
+    [data-baseweb="popover"] li {
         white-space: pre-wrap !important;
         word-break: break-word !important;
         line-height: 1.4 !important;
