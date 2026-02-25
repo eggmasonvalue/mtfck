@@ -75,8 +75,10 @@ def get_unique_industries(industry_data):
             basic_industry = details[-1]
             hierarchy = " > ".join(details[:-1]) if len(details) > 1 else "Unknown"
             
-            # Use a clean single-line format: Basic Industry [Hierarchy]
-            formatted_string = f"{basic_industry} [{hierarchy}]"
+            # Pad with 80 non-breaking spaces to push hierarchy out of view
+            # Streamlit truncates the view, but keeps it searchable and visible on hover tooltip
+            padding = chr(160) * 80 
+            formatted_string = f"{basic_industry}{padding}[{hierarchy}]"
             industries.add(formatted_string)
     return sorted(list(industries))
 
@@ -599,4 +601,4 @@ if show_net_outstanding_clicked:
     else:
         st.info("No summary data found.")
 
-st.caption("NSE MTF Analytics Dashboard - Powered by Caffeine and Copilot")
+st.caption("NSE MTF Analytics Dashboard")

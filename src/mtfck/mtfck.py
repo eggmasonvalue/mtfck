@@ -82,9 +82,10 @@ def calculate_returns(symbol, to_date, from_date=None):
 
 
 def _apply_industry(df: pd.DataFrame, industry_data: dict) -> pd.DataFrame:
+    padding = chr(160) * 80
     if not df.empty and "symbol" in df.columns:
         df["industry_path"] = df["symbol"].apply(
-            lambda x: f"{industry_data.get(x)[-1]} [{' > '.join(industry_data.get(x)[:-1]) if len(industry_data.get(x)) > 1 else 'Unknown'}]" 
+            lambda x: f"{industry_data.get(x)[-1]}{padding}[{' > '.join(industry_data.get(x)[:-1]) if len(industry_data.get(x)) > 1 else 'Unknown'}]" 
             if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 0 else "Unknown"
         )
         df["industry"] = df["symbol"].apply(
