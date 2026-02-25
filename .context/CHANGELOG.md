@@ -4,6 +4,9 @@
 ## [Unreleased]
 
 ### Changed
+- **Architecture**: Moved GitHub workflow to the `mtf_data` submodule to properly decouple the database from the logic superproject, running updates via a new `mtfck update` CLI.
+- **Database**: Fixed DuckDB concurrency patchwork. Connections now default to read-only for safe concurrent access by the Streamlit app, while the ingestion CLI requests explicit write access.
+- **Cleanup**: Removed the obsolete `migrate_legacy_data` function and LLM thinking trace comments from `ingestion.py`. Docstrings upgraded to professional standards.
 - **Database**: Migrated backend storage from SQLite (`stock_data.db`) to DuckDB (`stock_data.duckdb`) for ~10-20x storage efficiency gains using columnar compression.
 - **Dependencies**: Added `duckdb` (v1.2.0+).
 - **Ingestion**: Refactored `ingestion.py` to use DuckDB's native SQL engine for faster bulk inserts.

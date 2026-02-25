@@ -1,8 +1,7 @@
 import pytest
-import duckdb
 from unittest.mock import patch
 from mtfck.ingestion import sync_sequence, create_table
-from mtfck.db import get_connection, close_connection
+from mtfck.db import get_connection
 import mtfck.db
 
 @pytest.fixture

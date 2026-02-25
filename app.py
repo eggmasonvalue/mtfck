@@ -9,7 +9,6 @@ import pandas as pd
 from datetime import datetime, date
 from mtfck.db import get_connection  # Used for direct DB access
 from mtfck.mtfck import (
-    DB_PATH,
     download_and_store_range,
     get_next_available_date,
     get_prev_available_date,
@@ -21,17 +20,11 @@ from mtfck.mtfck import (
     nse,
     calculate_returns,
     get_ffmc_and_exposure,
-    migrate_legacy_data,
 )
 import plotly.graph_objects as go
 
 # Ensure DB and tables exist
 create_table()
-# Try auto-migration of legacy data
-try:
-    migrate_legacy_data()
-except Exception as e:
-    st.error(f"Migration Error: {e}")
 
 
 def get_available_dates():

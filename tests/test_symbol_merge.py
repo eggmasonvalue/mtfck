@@ -1,6 +1,4 @@
 import pytest
-import duckdb
-import pandas as pd
 from unittest.mock import patch, MagicMock
 from datetime import date
 from mtfck.ingestion import create_table, process_symbol_changes

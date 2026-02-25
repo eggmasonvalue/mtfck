@@ -1,10 +1,9 @@
 from datetime import timedelta
 from nse import NSE
 from pathlib import Path
-import duckdb
 import pandas as pd
 import matplotlib.pyplot as plt
-from .ingestion import create_table, download_and_store_range, migrate_legacy_data
+from .ingestion import create_table, download_and_store_range
 from .db import get_connection, DB_PATH
 
 DATA_DIR = Path("./data")

@@ -2,8 +2,6 @@ import pytest
 from playwright.sync_api import Page, expect
 import subprocess
 import time
-import os
-import signal
 import requests
 
 def wait_for_server(url, timeout=30):

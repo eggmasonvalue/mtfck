@@ -1,31 +1,29 @@
-
 import duckdb
 
 DB_PATH = "./mtf_data/stock_data.duckdb"
-_SHARED_CONN = None
 
-def get_connection(read_only=False):
+def get_connection(read_only: bool = True) -> duckdb.DuckDBPyConnection:
     """
-    Returns a shared DuckDB connection.
-    For a local Streamlit app, we maintain a single Read-Write connection 
-    to allow both querying and ingestion within the same process.
+    Establish and return a connection to the DuckDB database.
+    
+    Concurrent write access to DuckDB files can cause file lock contention. By defaulting 
+    to read-only mode, the Streamlit UI can safely perform multiple simultaneous queries 
+    without blocking. The separate ingestion process should explicitly request write 
+    access when updating the database.
+    
+    Args:
+        read_only (bool): Whether to open the database in read-only mode. Defaults to True.
+        
+    Returns:
+        duckdb.DuckDBPyConnection: An active connection to the DuckDB database.
     """
-    global _SHARED_CONN
-    if _SHARED_CONN is None:
-        try:
-            # Always try to open in Read-Write mode first so ingestion can work
-            _SHARED_CONN = duckdb.connect(DB_PATH, read_only=False)
-        except Exception as e:
-            print(f"Warning: Could not open DB in Read-Write mode. Trying Read-Only. Error: {e}")
-            try:
-                _SHARED_CONN = duckdb.connect(DB_PATH, read_only=True)
-            except Exception as e2:
-                print(f"Critical: Could not open DB. Error: {e2}")
-                raise e2
-    return _SHARED_CONN
+    return duckdb.connect(DB_PATH, read_only=read_only)
 
 def close_connection():
-    global _SHARED_CONN
-    if _SHARED_CONN:
-        _SHARED_CONN.close()
-        _SHARED_CONN = None
+    """
+    Close the shared database connection if one exists.
+    
+    Deprecated: Connections are now managed per-request to avoid file lock contention,
+    so this function is a no-op kept temporarily for backward compatibility.
+    """
+    pass
