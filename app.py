@@ -24,14 +24,14 @@ from mtfck.mtfck import (
 import plotly.graph_objects as go
 
 def download_database():
-    db_path = "mtf_data/stock_data.duckdb"
-    schema_path = "mtf_data/schema.sql"
-    db_url = "https://github.com/eggmasonvalue/MTFDB/raw/main/stock_data.duckdb"
-    schema_url = "https://raw.githubusercontent.com/eggmasonvalue/MTFDB/main/schema.sql"
+    db_path = "mtf_data/stock_data.parquet"
+    summary_path = "mtf_data/daily_summary.parquet"
+    db_url = "https://github.com/eggmasonvalue/MTFDB/raw/main/stock_data.parquet"
+    summary_url = "https://github.com/eggmasonvalue/MTFDB/raw/main/daily_summary.parquet"
     
     os.makedirs("mtf_data", exist_ok=True)
     
-    with st.spinner("Downloading latest database and schema from cloud..."):
+    with st.spinner("Downloading latest database from cloud..."):
         try:
             close_connection()
             r = requests.get(db_url, stream=True)
@@ -40,15 +40,16 @@ def download_database():
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
                     
-            r_schema = requests.get(schema_url)
-            r_schema.raise_for_status()
-            with open(schema_path, "wb") as f:
-                f.write(r_schema.content)
+            r_summary = requests.get(summary_url, stream=True)
+            r_summary.raise_for_status()
+            with open(summary_path, "wb") as f:
+                for chunk in r_summary.iter_content(chunk_size=8192):
+                    f.write(chunk)
         except Exception as e:
             st.error(f"Failed to sync database: {e}")
 
 # Auto-download on first load if missing
-if not os.path.exists("mtf_data/stock_data.duckdb"):
+if not os.path.exists("mtf_data/stock_data.parquet"):
     download_database()
 
 @st.cache_data(ttl=86400)

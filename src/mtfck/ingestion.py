@@ -226,7 +226,7 @@ def process_symbol_changes() -> None:
         print(f"Symbol changes processed: {count_renamed} symbols affected.")
 
 
-def update_to_today() -> None:
+def update_to_today(from_date_str: str = None) -> None:
     """
     Calculate missing dates since the last update and fetch the latest reports.
     """
@@ -240,7 +240,9 @@ def update_to_today() -> None:
     except Exception:
         last_date = None
 
-    if last_date:
+    if from_date_str:
+        from_date = pd.to_datetime(from_date_str).date()
+    elif last_date:
         from_date = last_date + timedelta(days=1)
     else:
         from_date = date.today() - timedelta(days=30)
@@ -253,3 +255,10 @@ def update_to_today() -> None:
 
     print(f"Updating database from {from_date} to {to_date}")
     download_and_store_range(from_date, to_date)
+    
+    # Export in-memory tables back to parquet
+    from .db import DB_PATH, SUMMARY_PATH
+    print("Exporting updated tables to parquet...")
+    conn.execute(f"COPY stock_data TO '{DB_PATH}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+    conn.execute(f"COPY daily_summary TO '{SUMMARY_PATH}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+    print("Export complete.")
