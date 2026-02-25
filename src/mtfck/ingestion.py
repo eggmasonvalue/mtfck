@@ -30,10 +30,20 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
     Inserts data directly into the denormalized stock_data table.
     
     Args:
-        csv_path (str): Path to the daily CSV file.
+        csv_path (str): Path to the daily CSV file (or directory containing it).
         date_str (str): Date of the file contents in YYYY-MM-DD format.
     """
-    with open(csv_path, "r", encoding="utf-8") as f:
+    p = Path(csv_path)
+    if p.is_dir():
+        csv_files = list(p.glob("**/*.csv"))
+        if not csv_files:
+            raise FileNotFoundError(f"No CSV file found in directory {csv_path}")
+        # Use the first CSV file found
+        actual_path = str(csv_files[0])
+    else:
+        actual_path = csv_path
+
+    with open(actual_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
         
     header_idx = None
@@ -53,7 +63,7 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
             summary["net_outstanding_end"] = float(line.split(",")[2].replace(",", "").strip())
             
     if header_idx is None:
-        raise ValueError(f"Header not found in {csv_path}")
+        raise ValueError(f"Header not found in {actual_path}")
 
     conn = get_connection(read_only=False)
 
@@ -67,7 +77,7 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
             FROM df_summary
         """)
 
-    df = pd.read_csv(csv_path, skiprows=header_idx)
+    df = pd.read_csv(actual_path, skiprows=header_idx)
     df = df.rename(
         columns={
             "Symbol": "symbol",
@@ -95,10 +105,15 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
     """)
 
     try:
-        Path(csv_path).unlink()
-        print(f"Deleted file {csv_path}")
+        if p.is_dir():
+            import shutil
+            shutil.rmtree(csv_path)
+            print(f"Deleted directory {csv_path}")
+        else:
+            p.unlink()
+            print(f"Deleted file {csv_path}")
     except Exception as e:
-        print(f"Warning: Could not delete file {csv_path}: {e}")
+        print(f"Warning: Could not delete {csv_path}: {e}")
 
 
 def download_and_store_range(from_date: date, to_date: date) -> None:
