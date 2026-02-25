@@ -510,8 +510,9 @@ if show_trend_clicked:
 # --- Net Outstanding Trend Display ---
 if show_net_outstanding_clicked:
     conn = get_connection()
-    df_chart = conn.sql(
-        "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date"
+    df_chart = conn.execute(
+        "SELECT date, net_outstanding_end FROM daily_summary WHERE date BETWEEN ? AND ? ORDER BY date",
+        (from_date_db, to_date_db)
     ).df()
     
     if not df_chart.empty:
