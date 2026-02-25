@@ -3,6 +3,7 @@ from nse import NSE
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+import requests
 from .ingestion import create_table, download_and_store_range
 from .db import get_connection, DB_PATH
 
@@ -10,8 +11,19 @@ DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 SCHEMA_PATH = "./db/schema.sql"
 
-# Note: download_folder is set to DATA_DIR to match ingestion.py
 nse = NSE(download_folder=DATA_DIR)
+
+
+def fetch_industry_data() -> dict:
+    """Fetch the latest industry mapping JSON from GitHub."""
+    url = "https://raw.githubusercontent.com/eggmasonvalue/stock-industry-map-in/main/out/industry_data.json"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        return r.json().get("data", {})
+    except Exception as e:
+        print(f"Error fetching industry data: {e}")
+        return {}
 
 
 def plot_net_outstanding_end():
@@ -22,7 +34,7 @@ def plot_net_outstanding_end():
             "SELECT date, net_outstanding_end FROM daily_summary ORDER BY date"
         ).df()
     except Exception:
-        df = pd.DataFrame() # Handle table not exists or empty
+        df = pd.DataFrame()
         
     if df.empty:
         print("No summary data found.")
@@ -51,19 +63,16 @@ def calculate_returns(symbol, to_date, from_date=None):
     one_year_return = None
     three_year_cagr = None
 
-    # Point-to-point return
     if from_date:
         close_from = get_next_trading_close(symbol, pd.to_datetime(from_date).date())
         if close_from is not None and close_to is not None:
             ptp_return = ((close_to - close_from) / close_from) * 100
 
-    # 1yr Return (%)
     one_year_date = (pd.to_datetime(to_date) - timedelta(days=365)).date()
     close_1yr = get_next_trading_close(symbol, one_year_date)
     if close_1yr is not None and close_to is not None:
         one_year_return = ((close_to - close_1yr) / close_1yr) * 100
 
-    # 3yr Return (%) (CAGR)
     three_year_date = (pd.to_datetime(to_date) - timedelta(days=3 * 365)).date()
     close_3yr = get_next_trading_close(symbol, three_year_date)
     if close_3yr is not None and close_to is not None:
@@ -72,40 +81,35 @@ def calculate_returns(symbol, to_date, from_date=None):
     return ptp_return, one_year_return, three_year_cagr
 
 
+def _apply_industry(df: pd.DataFrame, industry_data: dict) -> pd.DataFrame:
+    if not df.empty and "symbol" in df.columns:
+        df["industry"] = df["symbol"].apply(
+            lambda x: industry_data.get(x, ["", "", "Unknown"])[2] if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 2 else "Unknown"
+        )
+    else:
+        df["industry"] = pd.Series(dtype=str)
+    return df
+
+
 def get_top5_amt_financed(
-    to_date: str, top_n: int = 5, industries: list = None, from_date: str = None
+    to_date: str, top_n: int = 5, industries: list = None, from_date: str = None, industry_data: dict = None
 ):
     """
-    Return top N stocks by amt_financed on to_date,
-    with ffmc (free float market cap, in lakhs), exposure % (amt_financed/ffmc),
-    and point-to-point return (%) between from_date and to_date.
-    Optionally filter by industries.
+    Return top N stocks by amt_financed on to_date.
     """
     conn = get_connection()
-    if industries:
-        placeholders = ",".join(f"'{ind}'" for ind in industries) 
-        query = f"""
-            SELECT m.symbol, m.name, m.industry, s.amt_financed
-            FROM stock_data s
-            JOIN stock_master m ON s.stock_id = m.stock_id
-            WHERE s.date = ? AND m.industry IN ({placeholders})
-            ORDER BY s.amt_financed DESC
-            LIMIT ?
-        """
-        params = (to_date, top_n)
+    query = "SELECT symbol, amt_financed FROM stock_data WHERE date = ?"
+    df = conn.execute(query, (to_date,)).df()
+
+    if industry_data:
+        df = _apply_industry(df, industry_data)
     else:
-        query = """
-            SELECT m.symbol, m.name, m.industry, s.amt_financed
-            FROM stock_data s
-            JOIN stock_master m ON s.stock_id = m.stock_id
-            WHERE s.date = ?
-            ORDER BY s.amt_financed DESC
-            LIMIT ?
-        """
-        params = (to_date, top_n)
-    
-    # duckdb execute requires a list/tuple for params
-    df = conn.execute(query, params).df()
+        df["industry"] = "Unknown"
+
+    if industries:
+        df = df[df["industry"].isin(industries)]
+
+    df = df.sort_values("amt_financed", ascending=False).head(top_n)
 
     ffmc_list = []
     exposure_pct_list = []
@@ -131,61 +135,37 @@ def get_top5_amt_financed(
     df["1yr Return (%)"] = one_year_return_list
     df["3yr Return (%) (CAGR)"] = three_year_cagr_list
 
-    # Return the full DataFrame with all columns
     return df
 
 
 def get_top5_amt_financed_pct_change(
-    from_date: str, to_date: str, top_n: int = 5, industries: list = None
+    from_date: str, to_date: str, top_n: int = 5, industries: list = None, industry_data: dict = None
 ):
     """
     Return top N stocks by percentage change in amt_financed between from_date and to_date.
-    Only stocks present on both dates are considered.
-    Optionally filter by industries.
-    Adds point-to-point return (%) for the date range.
     """
     conn = get_connection()
-    if industries:
-        placeholders = ",".join(f"'{ind}'" for ind in industries)
-        
-        # Using f-strings for industries for now as DuckDB python api doesn't always handle IN list params smoothly across versions
-        df_from = conn.execute(
-            f"""SELECT m.symbol, s.amt_financed
-                FROM stock_data s
-                JOIN stock_master m ON s.stock_id = m.stock_id
-                WHERE s.date = ? AND s.amt_financed != 0 AND m.industry IN ({placeholders})""",
-            (from_date,)
-        ).df()
-        df_to = conn.execute(
-            f"""SELECT m.symbol, s.amt_financed
-                FROM stock_data s
-                JOIN stock_master m ON s.stock_id = m.stock_id
-                WHERE s.date = ? AND s.amt_financed >= 50 AND m.industry IN ({placeholders})""",
-            (to_date,)
-        ).df()
-    else:
-        df_from = conn.execute(
-            """SELECT m.symbol, s.amt_financed
-               FROM stock_data s
-               JOIN stock_master m ON s.stock_id = m.stock_id
-               WHERE s.date = ? AND s.amt_financed != 0""",
-            (from_date,)
-        ).df()
-        df_to = conn.execute(
-            """SELECT m.symbol, s.amt_financed
-               FROM stock_data s
-               JOIN stock_master m ON s.stock_id = m.stock_id
-               WHERE s.date = ? AND s.amt_financed >= 50""",
-            (to_date,)
-        ).df()
+    
+    df_from = conn.execute(
+        "SELECT symbol, amt_financed FROM stock_data WHERE date = ? AND amt_financed != 0",
+        (from_date,)
+    ).df()
+    df_to = conn.execute(
+        "SELECT symbol, amt_financed FROM stock_data WHERE date = ? AND amt_financed >= 50",
+        (to_date,)
+    ).df()
     
     df = pd.merge(df_from, df_to, on="symbol", suffixes=("_from", "_to"))
-    df["pct_change"] = (
-        (df["amt_financed_to"] - df["amt_financed_from"]) / df["amt_financed_from"]
-    ) * 100
+    df["pct_change"] = ((df["amt_financed_to"] - df["amt_financed_from"]) / df["amt_financed_from"]) * 100
     
-    df_master = conn.execute("SELECT symbol, name, industry FROM stock_master").df()
-    df = pd.merge(df, df_master, on="symbol")
+    if industry_data:
+        df = _apply_industry(df, industry_data)
+    else:
+        df["industry"] = "Unknown"
+
+    if industries:
+        df = df[df["industry"].isin(industries)]
+
     df = df.sort_values("pct_change", ascending=False).head(top_n)
 
     ffmc_list = []
@@ -193,13 +173,12 @@ def get_top5_amt_financed_pct_change(
     ptp_return_list = []
     one_year_return_list = []
     three_year_cagr_list = []
+    
     for _, row in df.iterrows():
-        # Use amt_financed_to for ffmc/exposure
         ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, "amt_financed_to")
         ffmc_list.append(ffmc_lakhs)
         exposure_pct_list.append(exposure_pct)
 
-        # Use symbol and to_date for returns
         ptp_return, one_year_return, three_year_cagr = calculate_returns(
             row["symbol"], to_date, from_date
         )
@@ -213,64 +192,44 @@ def get_top5_amt_financed_pct_change(
     df["1yr Return (%)"] = one_year_return_list
     df["3yr Return (%) (CAGR)"] = three_year_cagr_list
 
-    # Return the full DataFrame with all columns
     return df
 
 
-def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None):
+def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None, industry_data: dict = None):
     """
     Return all stocks that are newly added in MTF from from_date to to_date.
-    Optionally filter by industries.
-    Adds point-to-point return (%) for the date range.
     """
     conn = get_connection()
-    if industries:
-        placeholders = ",".join(f"'{ind}'" for ind in industries)
-        df_to = conn.execute(
-            f"""SELECT m.symbol, s.amt_financed
-                FROM stock_data s
-                JOIN stock_master m ON s.stock_id = m.stock_id
-                WHERE s.date = ? AND m.industry IN ({placeholders})""",
-            (to_date,)
-        ).df()
-        df_from = conn.execute(
-            f"""SELECT m.symbol, s.amt_financed
-                FROM stock_data s
-                JOIN stock_master m ON s.stock_id = m.stock_id
-                WHERE s.date = ? AND m.industry IN ({placeholders})""",
-            (from_date,)
-        ).df()
-    else:
-        df_to = conn.execute(
-            """SELECT m.symbol, s.amt_financed
-               FROM stock_data s
-               JOIN stock_master m ON s.stock_id = m.stock_id
-               WHERE s.date = ?""",
-            (to_date,)
-        ).df()
-        df_from = conn.execute(
-            """SELECT m.symbol, s.amt_financed
-               FROM stock_data s
-               JOIN stock_master m ON s.stock_id = m.stock_id
-               WHERE s.date = ?""",
-            (from_date,)
-        ).df()
+    df_to = conn.execute(
+        "SELECT symbol, amt_financed FROM stock_data WHERE date = ?",
+        (to_date,)
+    ).df()
+    df_from = conn.execute(
+        "SELECT symbol, amt_financed FROM stock_data WHERE date = ?",
+        (from_date,)
+    ).df()
         
     new_symbols = set(df_to["symbol"]) - set(df_from["symbol"])
     df_new = df_to[df_to["symbol"].isin(new_symbols)].copy()
     df_new["amt_financed_from"] = 0
-    
-    df_master = conn.execute("SELECT symbol, name, industry FROM stock_master").df()
-    df_new = pd.merge(df_new, df_master, on="symbol")
     df_new = df_new.rename(columns={"amt_financed": "amt_financed_to"})
+
+    if industry_data:
+        df_new = _apply_industry(df_new, industry_data)
+    else:
+        df_new["industry"] = "Unknown"
+
+    if industries:
+        df_new = df_new[df_new["industry"].isin(industries)]
 
     ffmc_list = []
     exposure_pct_list = []
     ptp_return_list = []
     one_year_return_list = []
     three_year_cagr_list = []
+    
     for idx, row in df_new.iterrows():
-        print(f"Processing newly added symbol: {row['symbol']} ({row['name']})")
+        print(f"Processing newly added symbol: {row['symbol']}")
         ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, "amt_financed_to")
         ffmc_list.append(ffmc_lakhs)
         exposure_pct_list.append(exposure_pct)
@@ -281,59 +240,33 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
         ptp_return_list.append(ptp_return)
         one_year_return_list.append(one_year_return)
         three_year_cagr_list.append(three_year_cagr)
-    # Assign columns before sorting and selecting columns
-    df_new["Free Float Market Cap (₹ Lakhs)"] = (
-        ffmc_list if len(df_new) == len(ffmc_list) else [None] * len(df_new)
-    )
-    df_new["Exposure (%)"] = (
-        exposure_pct_list
-        if len(df_new) == len(exposure_pct_list)
-        else [None] * len(df_new)
-    )
-    df_new["Point-to-Point Return (%)"] = (
-        ptp_return_list
-        if len(df_new) == len(ptp_return_list)
-        else [None] * len(df_new)
-    )
-    df_new["1yr Return (%)"] = (
-        one_year_return_list
-        if len(df_new) == len(one_year_return_list)
-        else [None] * len(df_new)
-    )
-    df_new["3yr Return (%) (CAGR)"] = (
-        three_year_cagr_list
-        if len(df_new) == len(three_year_cagr_list)
-        else [None] * len(df_new)
-    )
-    # Do not sort or filter by top_n, return all
+
+    df_new["Free Float Market Cap (₹ Lakhs)"] = ffmc_list if len(df_new) == len(ffmc_list) else [None] * len(df_new)
+    df_new["Exposure (%)"] = exposure_pct_list if len(df_new) == len(exposure_pct_list) else [None] * len(df_new)
+    df_new["Point-to-Point Return (%)"] = ptp_return_list if len(df_new) == len(ptp_return_list) else [None] * len(df_new)
+    df_new["1yr Return (%)"] = one_year_return_list if len(df_new) == len(one_year_return_list) else [None] * len(df_new)
+    df_new["3yr Return (%) (CAGR)"] = three_year_cagr_list if len(df_new) == len(three_year_cagr_list) else [None] * len(df_new)
+
     return df_new
 
 
-def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = None):
+def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = None, industry_data: dict = None):
     """
     Return top N stocks by exposure % (amt_financed / ffmc) on to_date.
-    Optionally filter by industries.
     """
     conn = get_connection()
-    if industries:
-        placeholders = ",".join(f"'{ind}'" for ind in industries)
-        query = f"""
-            SELECT m.symbol, m.name, m.industry, s.amt_financed
-            FROM stock_data s
-            JOIN stock_master m ON s.stock_id = m.stock_id
-            WHERE s.date = ? AND m.industry IN ({placeholders})
-        """
-        params = (to_date,)
-    else:
-        query = """
-            SELECT m.symbol, m.name, m.industry, s.amt_financed
-            FROM stock_data s
-            JOIN stock_master m ON s.stock_id = m.stock_id
-            WHERE s.date = ?
-        """
-        params = (to_date,)
+    df = conn.execute(
+        "SELECT symbol, amt_financed FROM stock_data WHERE date = ?",
+        (to_date,)
+    ).df()
     
-    df = conn.execute(query, params).df()
+    if industry_data:
+        df = _apply_industry(df, industry_data)
+    else:
+        df["industry"] = "Unknown"
+
+    if industries:
+        df = df[df["industry"].isin(industries)]
 
     ffmc_list = []
     exposure_pct_list = []
@@ -349,11 +282,9 @@ def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = Non
     df = df.dropna(subset=["Exposure (%)"])
     df = df.sort_values("Exposure (%)", ascending=False).head(top_n)
 
-    # Only keep relevant columns
     return df[
         [
             "symbol",
-            "name",
             "industry",
             "amt_financed",
             "Free Float Market Cap (₹ Lakhs)",
@@ -372,30 +303,31 @@ __all__ = [
     "get_newly_added_stocks",
     "get_top_exposure_stocks",
     "create_table",
+    "fetch_industry_data",
 ]
 
 
 def get_next_available_date(target_date):
-    """Return the earliest date >= target_date present in stock_data table as YYYY-MM-DD string, or None if not found."""
+    """Return the earliest date >= target_date present in stock_data table."""
     conn = get_connection()
     res = conn.execute(
         "SELECT MIN(date) FROM stock_data WHERE date >= ?",
         (target_date.strftime("%Y-%m-%d"),),
     ).fetchone()
     if res and res[0]:
-        return res[0] # Returns date object
+        return res[0]
     return None
 
 
 def get_prev_available_date(target_date):
-    """Return the latest date <= target_date present in stock_data table as YYYY-MM-DD string, or None if not found."""
+    """Return the latest date <= target_date present in stock_data table."""
     conn = get_connection()
     res = conn.execute(
         "SELECT MAX(date) FROM stock_data WHERE date <= ?",
         (target_date.strftime("%Y-%m-%d"),),
     ).fetchone()
     if res and res[0]:
-        return res[0] # Returns date object
+        return res[0]
     return None
 
 
@@ -405,7 +337,6 @@ def get_next_trading_close(symbol, target_date):
     for i in range(max_tries):
         d = target_date + timedelta(days=i)
         try:
-            # Fetch historical data for the symbol
             hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
             if hist and "chClosingPrice" in hist[0]:
                 try:

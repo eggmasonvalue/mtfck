@@ -4,6 +4,9 @@
 ## [Unreleased]
 
 ### Changed
+- **Database Refactor**: Completely flattened `stock_data` schema. Dropped `stock_master` table and integer IDs to directly store strings (`symbol`), relying on DuckDB's native dictionary encoding for compression.
+- **Ingestion**: Stripped out slow API fetches for industry data and complex ID-mapping logic from the CSV ingestion pipeline. Inserts are now practically instantaneous.
+- **Runtime Enrichment**: Integrated Just-In-Time (JIT) metadata mapping. Industry data is now fetched at runtime as a JSON file from GitHub and merged in Pandas, removing the need for slow `JOIN`s in analytical SQL queries.
 - **Architecture**: Moved GitHub workflow to the `mtf_data` submodule to properly decouple the database from the logic superproject, running updates via a new `mtfck update` CLI.
 - **Database**: Fixed DuckDB concurrency patchwork. Connections now default to read-only for safe concurrent access by the Streamlit app, while the ingestion CLI requests explicit write access.
 - **Cleanup**: Removed the obsolete `migrate_legacy_data` function and LLM thinking trace comments from `ingestion.py`. Docstrings upgraded to professional standards.

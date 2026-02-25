@@ -30,8 +30,7 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
     Parse a Margin Trading Facility (MTF) CSV file and insert the data into the database.
     
     Extracts overall daily summary metrics and individual stock financing data. 
-    New symbols are automatically resolved against the NSE API for industry metadata 
-    and added to the master table before the daily data is recorded.
+    Inserts data directly into the denormalized stock_data table.
     
     Args:
         csv_path (str): Path to the daily CSV file.
@@ -75,50 +74,27 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
     df = df.rename(
         columns={
             "Symbol": "symbol",
-            "Name": "name",
             "Qty Fin by all the members(No.of Shares)": "qty_financed",
             "Amt Fin by all the members(Rs. In Lakhs)": "amt_financed",
         }
     )
     df["date"] = pd.to_datetime(date_str).date()
 
-    required_cols = ["symbol", "name", "qty_financed", "amt_financed"]
+    required_cols = ["symbol", "qty_financed", "amt_financed"]
     df = df.dropna(subset=required_cols)
     df = df[df[required_cols].map(lambda x: str(x).strip() != "").all(axis=1)]
 
-    unique_symbols = df[["symbol", "name"]].drop_duplicates()
-
-    existing_symbols_df = conn.sql("SELECT symbol FROM stock_master").df()
-    existing_symbols = set(existing_symbols_df["symbol"]) if not existing_symbols_df.empty else set()
-
-    new_symbols_df = unique_symbols[~unique_symbols["symbol"].isin(existing_symbols)].copy()
-
-    if not new_symbols_df.empty:
-        print(f"Found {len(new_symbols_df)} new symbols. Fetching industries...")
-        industries = []
-        for symbol in new_symbols_df["symbol"]:
-            try:
-                meta = nse.equityMetaInfo(symbol)
-                industry = meta.get("industry", None)
-            except Exception:
-                industry = None
-            industries.append(industry)
-        new_symbols_df["industry"] = industries
-
-        conn.sql("INSERT INTO stock_master (symbol, name, industry) SELECT symbol, name, industry FROM new_symbols_df")
-        print(f"Inserted {len(new_symbols_df)} new symbols.")
-
     conn.register("df_staging", df)
 
+    # Note: duckdb automatically handles inserting directly via SQL from the registered DataFrame
     conn.sql("""
-        INSERT INTO stock_data (date, stock_id, qty_financed, amt_financed)
+        INSERT OR IGNORE INTO stock_data (date, symbol, qty_financed, amt_financed)
         SELECT
             d.date,
-            m.stock_id,
+            d.symbol,
             d.qty_financed,
             d.amt_financed
         FROM df_staging d
-        JOIN stock_master m ON d.symbol = m.symbol
     """)
 
     try:
@@ -176,8 +152,7 @@ def process_symbol_changes() -> None:
     """
     Download and process corporate symbol changes from NSE.
     
-    Handles the renaming and merging of historic stock data by correctly mapping 
-    old symbols to their new identities in the master table and updating foreign keys.
+    Handles the renaming of historic stock data by updating symbols directly.
     """
     print("Checking for symbol changes...")
     url = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
@@ -218,105 +193,37 @@ def process_symbol_changes() -> None:
 
     conn = get_connection(read_only=False)
 
-    try:
-        existing_symbols_df = conn.sql("SELECT stock_id, symbol, name, industry FROM stock_master").df()
-    except Exception:
-        return
-
-    if existing_symbols_df.empty:
-        return
-
-    symbol_map = {row['symbol']: row.to_dict() for _, row in existing_symbols_df.iterrows()}
     count_renamed = 0
-    count_merged = 0
 
     for old_sym, new_sym in changes:
-        if old_sym not in symbol_map:
+        # Check if the old symbol exists in the database
+        try:
+            res = conn.execute("SELECT 1 FROM stock_data WHERE symbol = ? LIMIT 1", [old_sym]).fetchone()
+            if not res:
+                continue
+        except Exception:
             continue
 
-        old_row = symbol_map[old_sym]
-        old_id = old_row['stock_id']
-
-        if new_sym in symbol_map:
-            new_id = symbol_map[new_sym]['stock_id']
-            print(f"Merging {old_sym} (ID: {old_id}) into existing {new_sym} (ID: {new_id})")
-            count_merged += 1
-        else:
-            name = old_row['name']
-            industry = old_row['industry']
-            print(f"Renaming {old_sym} (ID: {old_id}) -> {new_sym} (New Entry)")
-
-            conn.execute("INSERT INTO stock_master (symbol, name, industry) VALUES (?, ?, ?)", [new_sym, name, industry])
-            try:
-                new_id = conn.sql(f"SELECT stock_id FROM stock_master WHERE symbol = '{new_sym}'").fetchone()[0]
-                symbol_map[new_sym] = {'stock_id': new_id, 'symbol': new_sym, 'name': name, 'industry': industry}
-                count_renamed += 1
-            except Exception as e:
-                print(f"Error inserting new symbol {new_sym}: {e}")
-                continue
-
-        query_update = f"""
-            UPDATE stock_data
-            SET stock_id = {new_id}
-            WHERE stock_id = {old_id}
-            AND date NOT IN (SELECT date FROM stock_data WHERE stock_id = {new_id})
-        """
-        conn.execute(query_update)
-        conn.execute(f"DELETE FROM stock_data WHERE stock_id = {old_id}")
-        
         try:
-            conn.execute(f"DELETE FROM stock_master WHERE stock_id = {old_id}")
+            # We want to rename old_sym to new_sym
+            # But what if new_sym already has data on those dates? We should ignore conflicts or sum them up.
+            # Easiest way in DuckDB without complex joins: update where no conflict, then delete remaining old.
+            conn.execute("""
+                UPDATE stock_data
+                SET symbol = ?
+                WHERE symbol = ? 
+                AND date NOT IN (SELECT date FROM stock_data WHERE symbol = ?)
+            """, [new_sym, old_sym, new_sym])
+            
+            # Delete any remaining rows for old_sym that couldn't be updated (collisions)
+            conn.execute("DELETE FROM stock_data WHERE symbol = ?", [old_sym])
+            count_renamed += 1
+            print(f"Merged/Renamed {old_sym} -> {new_sym}")
         except Exception as e:
-            print(f"Warning: Could not delete old master record for {old_sym} (ID {old_id}): {e}")
+            print(f"Error renaming {old_sym} to {new_sym}: {e}")
 
-        if old_sym in symbol_map:
-            del symbol_map[old_sym]
-
-    if count_renamed > 0 or count_merged > 0:
-        print(f"Symbol changes processed: {count_renamed} renamed, {count_merged} merged.")
-
-    null_ind_df = conn.sql("SELECT symbol FROM stock_master WHERE industry IS NULL").df()
-    if not null_ind_df.empty:
-        print(f"Fetching missing industries for {len(null_ind_df)} symbols...")
-        for sym in null_ind_df['symbol']:
-            try:
-                meta = nse.equityMetaInfo(sym)
-                ind = meta.get('industry', None)
-                if ind:
-                    conn.execute("UPDATE stock_master SET industry = ? WHERE symbol = ?", [ind, sym])
-            except Exception:
-                pass
-
-
-def sync_sequence() -> None:
-    """
-    Ensure the stock_id sequence matches the highest existing ID.
-    
-    DuckDB does not currently support 'ALTER SEQUENCE RESTART', so synchronization 
-    is handled by incrementally pulling values to fast-forward the sequence state.
-    """
-    conn = get_connection(read_only=False)
-    try:
-        conn.execute("SELECT 1 FROM stock_master LIMIT 1")
-    except duckdb.CatalogException:
-        return
-    except Exception:
-        return
-
-    row = conn.execute("SELECT MAX(stock_id) FROM stock_master").fetchone()
-    max_id = row[0] if row and row[0] is not None else 0
-
-    try:
-        seq_info = conn.execute("SELECT last_value FROM duckdb_sequences() WHERE sequence_name='stock_id_seq'").fetchone()
-        if seq_info:
-            current_val = seq_info[0] if seq_info[0] is not None else 0
-            if current_val < max_id:
-                diff = max_id - current_val
-                print(f"Syncing sequence: lagging by {diff}. Fast-forwarding...")
-                conn.execute(f"SELECT nextval('stock_id_seq') FROM range({diff})")
-                print(f"Sequence fast-forwarded to > {max_id}")
-    except Exception as e:
-        print(f"Warning: Could not sync sequence: {e}")
+    if count_renamed > 0:
+        print(f"Symbol changes processed: {count_renamed} symbols affected.")
 
 
 def update_to_today() -> None:
@@ -324,7 +231,6 @@ def update_to_today() -> None:
     Calculate missing dates since the last update and fetch the latest reports.
     """
     create_table()
-    sync_sequence()
     process_symbol_changes()
 
     conn = get_connection(read_only=False)

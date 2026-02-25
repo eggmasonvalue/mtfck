@@ -5,9 +5,8 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 import streamlit as st
 import pandas as pd
-# import sqlite3  <-- Removed
 from datetime import datetime, date
-from mtfck.db import get_connection  # Used for direct DB access
+from mtfck.db import get_connection
 from mtfck.mtfck import (
     download_and_store_range,
     get_next_available_date,
@@ -20,6 +19,7 @@ from mtfck.mtfck import (
     nse,
     calculate_returns,
     get_ffmc_and_exposure,
+    fetch_industry_data,
 )
 import plotly.graph_objects as go
 
@@ -27,26 +27,28 @@ import plotly.graph_objects as go
 create_table()
 
 
+@st.cache_data(ttl=86400)
+def get_cached_industry_data():
+    """Fetch and cache industry mapping data for 24 hours."""
+    return fetch_industry_data()
+
+
 def get_available_dates():
     try:
         conn = get_connection()
-        # DuckDB read_sql_query works, or we can use conn.sql().df()
         df = conn.sql("SELECT DISTINCT date FROM stock_data ORDER BY date").df()
-        # Ensure we return strings in YYYY-MM-DD format to avoid timestamp issues
         return pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d").tolist()
     except Exception:
         return []
 
 
-def get_unique_industries():
-    try:
-        conn = get_connection()
-        df = conn.sql(
-            "SELECT DISTINCT industry FROM stock_master WHERE industry IS NOT NULL AND industry != '' ORDER BY industry"
-        ).df()
-        return df["industry"].dropna().tolist()
-    except Exception:
-        return []
+def get_unique_industries(industry_data):
+    """Extract unique industries from the JSON dataset."""
+    industries = set()
+    for _, details in industry_data.items():
+        if isinstance(details, list) and len(details) > 2:
+            industries.add(details[2])
+    return sorted(list(industries))
 
 
 st.set_page_config(page_title="MTF Analytics Dashboard", layout="wide")
@@ -58,6 +60,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+industry_data = get_cached_industry_data()
 
 # --- Sidebar Controls ---
 with st.sidebar:
@@ -79,24 +83,24 @@ with st.sidebar:
     fetch_clicked = st.button(
         "Fetch/Update Data for Selected Range", use_container_width=True
     )
-    # Change top_n from selectbox to slider
     top_n = st.slider(
         "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
     )
-    industries = get_unique_industries()
+    
+    industries = get_unique_industries(industry_data)
     selected_industries = st.multiselect(
         "Industry Filter (optional)", industries, default=[]
     )
+    
     function = st.selectbox(
         "Analysis Type",
         [
             "Top by Amount Financed",
             "Top by % Change in Amount Financed",
             "Newly Added MTF Stocks",
-            "Top by Exposure %",  # <-- add new option
+            "Top by Exposure %",
         ],
     )
-    # Add warning if exposure % selected and no industry filter
     if function == "Top by Exposure %" and not selected_industries:
         st.warning(
             "For Exposure % analysis, please choose one or more industry filters to avoid long load time."
@@ -122,7 +126,6 @@ st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 # --- Data Fetch Logic ---
 def ensure_data_in_db(from_date, to_date):
     conn = get_connection()
-    # DuckDB returns None if table doesn't exist or empty, need to handle gracefully
     try:
         row = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data").fetchone()
         db_min = row[0]
@@ -135,8 +138,6 @@ def ensure_data_in_db(from_date, to_date):
     if not db_min or not db_max:
         need_download = True
     else:
-        # db_min/max are dates, standard comparison should work
-        # Convert inputs to strings if needed for specific logic, but date objects compare fine usually
         if from_date < db_min or to_date > db_max:
             need_download = True
             
@@ -157,9 +158,8 @@ if fetch_clicked:
 # --- Trend Analysis Logic ---
 def get_amt_financed_trend(symbol, from_date, to_date):
     conn = get_connection()
-    # Use DuckDB parameterized execute and .df()
     df = conn.execute(
-        "SELECT s.date, s.amt_financed FROM stock_data s JOIN stock_master m ON s.stock_id = m.stock_id WHERE m.symbol = ? AND s.date BETWEEN ? AND ? ORDER BY s.date",
+        "SELECT date, amt_financed FROM stock_data WHERE symbol = ? AND date BETWEEN ? AND ? ORDER BY date",
         (symbol, from_date, to_date)
     ).df()
     
@@ -188,8 +188,6 @@ to_date_db = get_prev_available_date(to_date)
 
 if not from_date_db or not to_date_db:
     st.warning("No data available for the selected range. Please fetch/update data.")
-    # But allow fetch button to work! The stop() prevents rendering below, which is fine
-    # But if fetch_clicked was set, it runs above and re-runs.
     if not fetch_clicked:
         st.stop()
 
@@ -205,15 +203,6 @@ if from_date_db and to_date_db:
     rerun_needed = (last_range != current_range) or (key not in st.session_state["results"])
 
 
-def filter_by_industry(df, industry_map, selected_industries):
-    if selected_industries:
-        df["Industry"] = df["Symbol"].map(industry_map)
-        df = df[df["Industry"].isin(selected_industries)]
-    else:
-        df["Industry"] = df["Symbol"].map(industry_map)
-    return df
-
-
 # --- Always get the latest analysis result for the current controls ---
 if run_analysis:
     if (
@@ -223,7 +212,7 @@ if run_analysis:
     ):
         if function == "Top by Amount Financed":
             df = get_top5_amt_financed(
-                to_date_db, top_n, selected_industries, from_date_db
+                to_date_db, top_n, selected_industries, from_date_db, industry_data
             )
             df["Amount Financed (₹ Cr)"] = df["amt_financed"] / 100
             df["Free Float Market Cap (₹ Cr)"] = (
@@ -232,14 +221,13 @@ if run_analysis:
             df = df.rename(
                 columns={
                     "symbol": "Symbol",
-                    "name": "Name",
                     "industry": "Industry",
                     "Exposure (%)": "Exposure (%)",
                 }
             )
         elif function == "Top by % Change in Amount Financed":
             df = get_top5_amt_financed_pct_change(
-                from_date_db, to_date_db, top_n, selected_industries
+                from_date_db, to_date_db, top_n, selected_industries, industry_data
             )
             df["Amount Financed Start (₹ Cr)"] = df["amt_financed_from"] / 100
             df["Amount Financed End (₹ Cr)"] = df["amt_financed_to"] / 100
@@ -249,14 +237,13 @@ if run_analysis:
             df = df.rename(
                 columns={
                     "symbol": "Symbol",
-                    "name": "Name",
                     "industry": "Industry",
                     "pct_change": "% Change",
                     "Exposure (%)": "Exposure (%)",
                 }
             )
         elif function == "Newly Added MTF Stocks":
-            df = get_newly_added_stocks(from_date_db, to_date_db, selected_industries)
+            df = get_newly_added_stocks(from_date_db, to_date_db, selected_industries, industry_data)
             df["Amount Financed Start (₹ Cr)"] = df["amt_financed_from"] / 100
             df["Amount Financed End (₹ Cr)"] = df["amt_financed_to"] / 100
             df["Free Float Market Cap (₹ Cr)"] = (
@@ -265,13 +252,12 @@ if run_analysis:
             df = df.rename(
                 columns={
                     "symbol": "Symbol",
-                    "name": "Name",
                     "industry": "Industry",
                     "Exposure (%)": "Exposure (%)",
                 }
             )
         elif function == "Top by Exposure %":
-            df = get_top_exposure_stocks(to_date_db, top_n, selected_industries)
+            df = get_top_exposure_stocks(to_date_db, top_n, selected_industries, industry_data)
             df["Amount Financed (₹ Cr)"] = df["amt_financed"] / 100
             df["Free Float Market Cap (₹ Cr)"] = (
                 df["Free Float Market Cap (₹ Lakhs)"] / 100
@@ -279,7 +265,6 @@ if run_analysis:
             df = df.rename(
                 columns={
                     "symbol": "Symbol",
-                    "name": "Name",
                     "industry": "Industry",
                     "Exposure (%)": "Exposure (%)",
                 }
@@ -298,7 +283,6 @@ if run_analysis:
             df[
                 [
                     "Symbol",
-                    "Name",
                     "Industry",
                     "Amount Financed (₹ Cr)",
                     "Free Float Market Cap (₹ Cr)",
@@ -319,7 +303,6 @@ if run_analysis:
             df[
                 [
                     "Symbol",
-                    "Name",
                     "Industry",
                     "Amount Financed Start (₹ Cr)",
                     "Amount Financed End (₹ Cr)",
@@ -340,7 +323,6 @@ if run_analysis:
             df[
                 [
                     "Symbol",
-                    "Name",
                     "Industry",
                     "Amount Financed Start (₹ Cr)",
                     "Amount Financed End (₹ Cr)",
@@ -359,7 +341,6 @@ if run_analysis:
             df[
                 [
                     "Symbol",
-                    "Name",
                     "Industry",
                     "Amount Financed (₹ Cr)",
                     "Free Float Market Cap (₹ Cr)",
@@ -379,7 +360,6 @@ if show_trend_clicked:
             ptp_return, one_year_return, three_year_cagr = calculate_returns(
                 trend_symbol_input, to_date_db, from_date_db
             )
-            # Use last available row for ffmc/exposure
             if not trend_df.empty:
                 amt_field = "amt_financed"
                 last_row = trend_df.iloc[-1]
@@ -391,7 +371,6 @@ if show_trend_clicked:
             ptp_return, one_year_return, three_year_cagr = None, None, None
             ffmc_lakhs, exposure_pct = None, None
 
-        # Convert lakhs to crores for display
         ffmc_cr = ffmc_lakhs / 100 if ffmc_lakhs is not None else None
 
         st.markdown(
@@ -445,7 +424,6 @@ if show_trend_clicked:
             )
         )
 
-        # Always show price overlay when button is clicked
         price_data = nse.fetch_equity_historical_data(
             trend_symbol_input,
             from_date=pd.to_datetime(from_date_db).date(),
@@ -453,7 +431,6 @@ if show_trend_clicked:
         )
         if price_data:
             price_df = pd.DataFrame(price_data)
-            # Handle potential column name changes in v2
             timestamp_col = (
                 "mTIMESTAMP" if "mTIMESTAMP" in price_df.columns else "CH_TIMESTAMP"
             )
@@ -462,7 +439,7 @@ if show_trend_clicked:
             if timestamp_col in price_df.columns and closing_col in price_df.columns:
                 price_df["date"] = pd.to_datetime(
                     price_df[timestamp_col], errors="coerce"
-                )  # Format might vary
+                )
                 price_df = price_df.sort_values("date")
                 price_df["pct_change"] = price_df[closing_col].pct_change() * 100
                 fig.add_trace(
@@ -530,14 +507,12 @@ if show_net_outstanding_clicked:
             )
         )
 
-        # Always show index overlay when button is clicked
         try:
             index_data = nse.fetch_historical_index_data(
                 index="NIFTY TOTAL MARKET",
                 from_date=pd.to_datetime(df_chart["date"].min()).date(),
                 to_date=pd.to_datetime(df_chart["date"].max()).date(),
             )
-            # v2.0.0 returns a list of dicts directly
             price_list = index_data if isinstance(index_data, list) else []
         except Exception as e:
             print(f"Error fetching index data: {e}")
@@ -545,11 +520,9 @@ if show_net_outstanding_clicked:
 
         price_df = pd.DataFrame(price_list)
         if not price_df.empty and "EOD_CLOSE_INDEX_VAL" in price_df.columns:
-            # Ensure date column handling matches new format if needed
-            # Old code used EOD_TIMESTAMP, let's verify if that key still exists or use logic to find date key
             timestamp_col = (
                 "EOD_TIMESTAMP" if "EOD_TIMESTAMP" in price_df.columns else "mTIMESTAMP"
-            )  # Fallback if needed
+            )
 
             if timestamp_col in price_df.columns:
                 price_df["date"] = pd.to_datetime(
