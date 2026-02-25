@@ -6,16 +6,16 @@ sys.path.append(str(Path(__file__).parent / "src"))
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
-from mtfck.db import get_connection
+import os
+import requests
+from mtfck.db import get_connection, close_connection
 from mtfck.mtfck import (
-    download_and_store_range,
     get_next_available_date,
     get_prev_available_date,
     get_top5_amt_financed,
     get_top5_amt_financed_pct_change,
     get_newly_added_stocks,
     get_top_exposure_stocks,
-    create_table,
     nse,
     calculate_returns,
     get_ffmc_and_exposure,
@@ -23,9 +23,33 @@ from mtfck.mtfck import (
 )
 import plotly.graph_objects as go
 
-# Ensure DB and tables exist
-create_table()
+def download_database():
+    db_path = "mtf_data/stock_data.duckdb"
+    schema_path = "mtf_data/schema.sql"
+    db_url = "https://github.com/eggmasonvalue/MTFDB/raw/main/stock_data.duckdb"
+    schema_url = "https://raw.githubusercontent.com/eggmasonvalue/MTFDB/main/schema.sql"
+    
+    os.makedirs("mtf_data", exist_ok=True)
+    
+    with st.spinner("Downloading latest database and schema from cloud..."):
+        try:
+            close_connection()
+            r = requests.get(db_url, stream=True)
+            r.raise_for_status()
+            with open(db_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    
+            r_schema = requests.get(schema_url)
+            r_schema.raise_for_status()
+            with open(schema_path, "wb") as f:
+                f.write(r_schema.content)
+        except Exception as e:
+            st.error(f"Failed to sync database: {e}")
 
+# Auto-download on first load if missing
+if not os.path.exists("mtf_data/stock_data.duckdb"):
+    download_database()
 
 @st.cache_data(ttl=86400)
 def get_cached_industry_data():
@@ -80,9 +104,11 @@ with st.sidebar:
     to_date = st.date_input(
         "To Date", value=datetime.strptime(str(max_date), "%Y-%m-%d").date(), key="to_date"
     )
-    fetch_clicked = st.button(
-        "Fetch/Update Data for Selected Range", width="stretch"
-    )
+    sync_clicked = st.button("Sync Database from Cloud", width="stretch")
+    if sync_clicked:
+        download_database()
+        st.rerun()
+
     top_n = st.slider(
         "Number of Top Stocks", min_value=5, max_value=50, value=5, step=1
     )
@@ -122,42 +148,6 @@ with st.sidebar:
 
 st.markdown(f"**Selected Range:** {from_date} to {to_date}")
 
-
-# --- Data Fetch Logic ---
-def ensure_data_in_db(from_date, to_date):
-    conn = get_connection()
-    try:
-        row = conn.execute("SELECT MIN(date), MAX(date) FROM stock_data").fetchone()
-        db_min = row[0]
-        db_max = row[1]
-    except Exception:
-        db_min = None
-        db_max = None
-        
-    need_download = False
-    if not db_min or not db_max:
-        need_download = True
-    else:
-        if from_date < db_min or to_date > db_max:
-            need_download = True
-            
-    if need_download:
-        st.info("Fetching missing data from NSE. This may take a while...")
-        try:
-            download_and_store_range(from_date, to_date)
-            st.success("Data updated!")
-            return True
-        except Exception as e:
-            st.error(f"Error updating data: {e}")
-            return False
-    return True
-
-
-if fetch_clicked:
-    if ensure_data_in_db(from_date, to_date):
-        st.rerun()
-
-
 # --- Trend Analysis Logic ---
 def get_amt_financed_trend(symbol, from_date, to_date):
     conn = get_connection()
@@ -190,9 +180,8 @@ from_date_db = get_next_available_date(from_date)
 to_date_db = get_prev_available_date(to_date)
 
 if not from_date_db or not to_date_db:
-    st.warning("No data available for the selected range. Please fetch/update data.")
-    if not fetch_clicked:
-        st.stop()
+    st.warning("No data available for the selected range. Please sync the database.")
+    st.stop()
 
 if from_date_db and to_date_db:
     key = cache_key(function, from_date_db, to_date_db, top_n, selected_industries)
