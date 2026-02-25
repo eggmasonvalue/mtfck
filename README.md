@@ -4,16 +4,13 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
 
 ## Features
 
-- Download and store daily NSE Margin Trading Disclosure reports.
-- Analyze top stocks by amount financed, % change in amount financed, and newly added MTF stocks.
-- Filter results by industry and date range.
-- View interactive trend charts for any stock, including overlays for price and index trends.
-- Display Free Float Market Cap (Cr), Exposure (%), Point-to-Point Return (%), 1yr Return (%), and 3yr CAGR for each stock.
-- Fast data fetch and update for missing date ranges.
-- Industry information is fetched and cached for each symbol.
-- Tables are interactive and sortable.
-- Project structure is modular and extensible.
-- **New Exposure % Analysis**: Sort stocks by exposure % (amount financed / free float market cap).
+- **Automated Data Pipeline**: Daily updates via GitHub Actions in the `MTFDB` repository.
+- **Parquet Data Lake**: Uses hyper-compressed Parquet files for storage, reducing 200MB+ of raw CSV data into ~2.5MB.
+- **One-Click Sync**: Synchronize your local dashboard with the latest cloud data directly from the UI.
+- **Top Stocks Analysis**: View leaders by Amount Financed, % Change, and Exposure %.
+- **Interactive Trends**: Overlap Margin Trading trends with NSE Stock Price and Index movements.
+- **Smart Industry Filtering**: Searchable industry hierarchy with hover tooltips for deep sector analysis.
+- **Performance Optimized**: Uses DuckDB in-memory for lightning-fast analytical queries on top of Parquet files.
 
 ## Usage
 
@@ -28,48 +25,26 @@ A dashboard for analyzing NSE Margin Trading Facility (MTF) data, including top 
    ```
 
 3. **Controls**  
-   - Use the sidebar to select date range, industry, and analysis type.
-   - Click "Fetch/Update Data for Selected Range" to download missing data.
-   - Click "Run Analysis" to view results.
-   - Use the "Trends" section to enter a symbol and view amount financed trends, price overlays, and index overlays.
-   - All trend charts display monetary values in ₹ Crores and allow comparison with price and index movements.
-   - For "Top by Exposure %", you **must** select at least one industry filter, otherwise the analysis may take a very long time.
-
-4. **Data**  
-   - Data is stored in `stock_data.db` and `data/` directory.
-   - Schema is defined in `db/schema.sql`.
+   - **Sync Database**: Click "Sync Database from Cloud" in the sidebar to download the latest data.
+   - **Analysis**: Select date range, industry, and analysis type, then click "Run Analysis".
+   - **Trends**: Enter a symbol and click "Show Amount Financed Trend" to see historical MTF data overlapped with price.
+   - **NIFTY Overlay**: Click "Show Total Outstanding Trend" to see the market-wide leverage trend overlapped with the NIFTY Total Market index.
 
 ## Project Structure
 
-- `app.py` - Streamlit dashboard UI and logic.
-- `mtfck.py` - Data download, parsing, and analysis functions.
-- `db/schema.sql` - SQLite schema.
-- `data/` - Downloaded CSV files.
+- `app.py` - Streamlit dashboard UI and cloud sync logic.
+- `src/mtfck/mtfck.py` - Core analytical logic and Just-In-Time (JIT) industry enrichment.
+- `src/mtfck/ingestion.py` - Data pipeline for parsing NSE reports and managing Parquet exports.
+- `src/mtfck/db.py` - Database connection manager (In-memory DuckDB mapped to Parquet).
+- `mtf_data/` - Local cache for `.parquet` data files (ignored by Git).
 
-## Notes
+## Tech Stack
 
-- All amounts are displayed in ₹ Crores (Cr) for consistency.
-- Trend charts and tables are interactive and sortable.
-- Industry information is fetched and cached for each symbol.
-- Exposure % is calculated as: `amt_financed / free float market cap`.
-- Price data is not adjusted for corporate actions.
-- For best performance, always use industry filters when running exposure analysis.
-
-
-# Challenges:
-- Likely to be abandoned/completely refactored due to several challenges
-  - throttling/rate limiting of data from NSE because of most functions requiring high frequency fetches - difficult to perform analysis by fetching exposure, ffmcap, return and other metrics, difficult to fetch and store stock-industry mapping data etc
-  - all of it can be fixed but the juice isn't worth the squeeze. much better alternative approaches available
-
+- **UI**: Streamlit
+- **Analytics**: DuckDB (In-process SQL engine)
+- **Storage**: Apache Parquet (ZSTD Compressed)
+- **Data Pipeline**: Python + GitHub Actions
+- **Data Source**: NSE India (National Stock Exchange)
 
 ## License
 MIT License
-
-
-
-## Task 1: Separation of concerns
-The MTF database must be segregated to https://github.com/eggmasonvalue/MTFDB(currently empty) and it should be a submodule to the current module. MTFDB will house just the database and a GitHub workflow. The workflow will clone the current repo to update and maintain that database
-## Task 2: maintainance
- ### symbol renaming: 
-The database maintainer/updater function should have the following logic: -  this link contains a CSV file for the list of all symbol changes historically:https://nsearchives.nseindia.com/content/equities/symbolchange.csv
-Download this .csv and use this to come up with a strategy to merge data where data exists with the old name in part of the db and with the new name for the rest
