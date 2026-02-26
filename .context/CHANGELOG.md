@@ -4,6 +4,7 @@
 ## [Unreleased]
 
 ### Added
+- **Documentation**: Updated `README.md` to be proper and comprehensive, integrating interactive screenshots of main features, trends, and market overlays.
 - **Parquet Migration**: Switched storage from monolithic DuckDB files to Apache Parquet format. Reduced storage footprint from 44MB to ~2.6MB (94% reduction) via ZSTD compression and dictionary encoding.
 - **One-Click Sync**: Re-engineered the UI to download latest parquet data directly from GitHub, replacing the local-only ingestion button.
 - **Improved Industry Filter**: Implemented a "Space Padding" hack in multiselect to hide long hierarchy strings in the dropdown while maintaining full searchability and native browser hover tooltips.
