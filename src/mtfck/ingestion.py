@@ -4,6 +4,7 @@ import duckdb
 import pandas as pd
 from nse import NSE
 from .db import get_connection
+from .utils import retry_request
 import csv
 import io
 import requests
@@ -116,6 +117,24 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
         print(f"Warning: Could not delete {csv_path}: {e}")
 
 
+@retry_request()
+def _download_for_date(d: date) -> None:
+    """
+    Download and parse report for a single date with retry mechanism.
+    """
+    date_str = d.strftime("%Y-%m-%d")
+    print(f"Processing {d}")
+    url = f"https://nsearchives.nseindia.com/content/equities/mrg_trading_{d.strftime('%d%m%y')}.zip"
+    print(f"Downloading from: {url}")
+    result = nse.download_document(url=url, folder=DATA_DIR)
+    if not result.is_file():
+        result.unlink(missing_ok=True)
+        raise FileNotFoundError(f"Failed to download file: {result.name}")
+
+    parse_and_insert(str(result), date_str)
+    print(f"Loaded {result} into DB for date {d}")
+
+
 def download_and_store_range(from_date: date, to_date: date) -> None:
     """
     Download and store NSE MTF Disclosure reports for a specific date range.
@@ -144,20 +163,21 @@ def download_and_store_range(from_date: date, to_date: date) -> None:
     print(f"Downloading {len(missing_dates)} dates: {[d.strftime('%Y-%m-%d') for d in missing_dates]}")
 
     for d in missing_dates:
-        date_str = d.strftime("%Y-%m-%d")
         try:
-            print(f"Processing {d}")
-            url = f"https://nsearchives.nseindia.com/content/equities/mrg_trading_{d.strftime('%d%m%y')}.zip"
-            print(f"Downloading from: {url}")
-            result = nse.download_document(url=url, folder=DATA_DIR)
-            if not result.is_file():
-                result.unlink(missing_ok=True)
-                raise FileNotFoundError(f"Failed to download file: {result.name}")
-
-            parse_and_insert(str(result), date_str)
-            print(f"Loaded {result} into DB for date {d}")
+            _download_for_date(d)
         except Exception as e:
             print(f"Failed for {d}: {e}")
+
+
+@retry_request()
+def _download_symbol_change_csv(url: str) -> str:
+    """
+    Download symbol change CSV with retry.
+    """
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+    return response.content.decode('ISO-8859-1')
 
 
 def process_symbol_changes() -> None:
@@ -169,10 +189,7 @@ def process_symbol_changes() -> None:
     print("Checking for symbol changes...")
     url = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        content = response.content.decode('ISO-8859-1')
+        content = _download_symbol_change_csv(url)
     except Exception as e:
         print(f"Failed to download symbol change CSV: {e}")
         return

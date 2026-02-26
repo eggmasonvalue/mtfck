@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import requests
 from .ingestion import create_table, download_and_store_range
 from .db import get_connection, DB_PATH
+from .utils import retry_request
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -13,15 +14,21 @@ DATA_DIR.mkdir(exist_ok=True)
 nse = NSE(download_folder=DATA_DIR)
 
 
+@retry_request()
+def _fetch_industry_data_unsafe() -> dict:
+    """Fetch the latest industry mapping JSON from GitHub (may raise exception)."""
+    url = "https://raw.githubusercontent.com/eggmasonvalue/stock-industry-map-in/main/out/industry_data.json"
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    return r.json().get("data", {})
+
+
 def fetch_industry_data() -> dict:
     """Fetch the latest industry mapping JSON from GitHub."""
-    url = "https://raw.githubusercontent.com/eggmasonvalue/stock-industry-map-in/main/out/industry_data.json"
     try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        return r.json().get("data", {})
+        return _fetch_industry_data_unsafe()
     except Exception as e:
-        print(f"Error fetching industry data: {e}")
+        print(f"Error fetching industry data after retries: {e}")
         return {}
 
 
@@ -34,7 +41,7 @@ def plot_net_outstanding_end():
         ).df()
     except Exception:
         df = pd.DataFrame()
-        
+
     if df.empty:
         print("No summary data found.")
         return
@@ -84,7 +91,7 @@ def _apply_industry(df: pd.DataFrame, industry_data: dict) -> pd.DataFrame:
     padding = chr(160) * 80
     if not df.empty and "symbol" in df.columns:
         df["industry_path"] = df["symbol"].apply(
-            lambda x: f"{industry_data.get(x)[-1]}{padding}[{' > '.join(industry_data.get(x)[:-1]) if len(industry_data.get(x)) > 1 else 'Unknown'}]" 
+            lambda x: f"{industry_data.get(x)[-1]}{padding}[{' > '.join(industry_data.get(x)[:-1]) if len(industry_data.get(x)) > 1 else 'Unknown'}]"
             if isinstance(industry_data.get(x), list) and len(industry_data.get(x)) > 0 else "Unknown"
         )
         df["industry"] = df["symbol"].apply(
@@ -151,7 +158,7 @@ def get_top5_amt_financed_pct_change(
     Return top N stocks by percentage change in amt_financed between from_date and to_date.
     """
     conn = get_connection()
-    
+
     df_from = conn.execute(
         "SELECT symbol, amt_financed FROM stock_data WHERE date = ? AND amt_financed != 0",
         (from_date,)
@@ -160,10 +167,10 @@ def get_top5_amt_financed_pct_change(
         "SELECT symbol, amt_financed FROM stock_data WHERE date = ? AND amt_financed >= 50",
         (to_date,)
     ).df()
-    
+
     df = pd.merge(df_from, df_to, on="symbol", suffixes=("_from", "_to"))
     df["pct_change"] = ((df["amt_financed_to"] - df["amt_financed_from"]) / df["amt_financed_from"]) * 100
-    
+
     if industry_data:
         df = _apply_industry(df, industry_data)
     else:
@@ -180,7 +187,7 @@ def get_top5_amt_financed_pct_change(
     ptp_return_list = []
     one_year_return_list = []
     three_year_cagr_list = []
-    
+
     for _, row in df.iterrows():
         ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, "amt_financed_to")
         ffmc_list.append(ffmc_lakhs)
@@ -215,7 +222,7 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
         "SELECT symbol, amt_financed FROM stock_data WHERE date = ?",
         (from_date,)
     ).df()
-        
+
     new_symbols = set(df_to["symbol"]) - set(df_from["symbol"])
     df_new = df_to[df_to["symbol"].isin(new_symbols)].copy()
     df_new["amt_financed_from"] = 0
@@ -235,7 +242,7 @@ def get_newly_added_stocks(from_date: str, to_date: str, industries: list = None
     ptp_return_list = []
     one_year_return_list = []
     three_year_cagr_list = []
-    
+
     for idx, row in df_new.iterrows():
         print(f"Processing newly added symbol: {row['symbol']}")
         ffmc_lakhs, exposure_pct = get_ffmc_and_exposure(row, "amt_financed_to")
@@ -267,7 +274,7 @@ def get_top_exposure_stocks(to_date: str, top_n: int = 5, industries: list = Non
         "SELECT symbol, amt_financed FROM stock_data WHERE date = ?",
         (to_date,)
     ).df()
-    
+
     if industry_data:
         df = _apply_industry(df, industry_data)
     else:
@@ -340,21 +347,31 @@ def get_prev_available_date(target_date):
     return None
 
 
+@retry_request()
+def _fetch_equity_historical_data_with_retry(symbol, from_date, to_date):
+    """Fetch equity historical data with retry."""
+    return nse.fetch_equity_historical_data(symbol, from_date=from_date, to_date=to_date)
+
+
 def get_next_trading_close(symbol, target_date):
     """Return closing price for the next available trading day >= target_date."""
     max_tries = 15
     for i in range(max_tries):
         d = target_date + timedelta(days=i)
         try:
-            hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
+            hist = _fetch_equity_historical_data_with_retry(symbol, from_date=d, to_date=d)
             if hist and "chClosingPrice" in hist[0]:
                 try:
                     return float(hist[0]["chClosingPrice"])
                 except Exception:
                     continue
         except Exception as e:
-            print(f"Error fetching next trading close for {symbol} on {d}: {e}")
-            return None
+            # If we hit an exception here, it means the retry decorator exhausted its attempts.
+            # This likely indicates a persistent network failure or API issue.
+            # We log it and stop trying subsequent days to avoid a long hang.
+            print(f"Failed to fetch historical data for {symbol} on {d} after retries: {e}")
+            break
+
     return None
 
 
