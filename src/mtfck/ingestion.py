@@ -12,7 +12,7 @@ import requests
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-nse = NSE(download_folder=DATA_DIR)
+nse = NSE(download_folder=DATA_DIR, server=True)
 
 
 def create_table() -> None:

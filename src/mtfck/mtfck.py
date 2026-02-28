@@ -11,7 +11,7 @@ from .utils import retry_request
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-nse = NSE(download_folder=DATA_DIR)
+nse = NSE(download_folder=DATA_DIR, server=True)
 
 
 @retry_request()

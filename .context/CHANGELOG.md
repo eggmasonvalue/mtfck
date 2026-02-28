@@ -13,6 +13,8 @@
 
 ### Changed
 - **Architecture**: Completely removed Git submodules and Git LFS. Data is now fetched via standard HTTP streaming from the `MTFDB` repository.
+- **Dependencies**: Upgraded `nse` to `nse[server]>=2.1.0`.
+- **Reliability**: Enabled `server=True` in `NSE` initialization to ensure stable HTTP/2 connections in server environments.
 - **Database Refactor**: Completely flattened `stock_data` schema. Dropped `stock_master` table and integer IDs to directly store strings (`symbol`), relying on DuckDB's native dictionary encoding for compression.
 - **Ingestion**: Stripped out slow API fetches for industry data and complex ID-mapping logic from the CSV ingestion pipeline. Inserts are now practically instantaneous.
 - **Runtime Enrichment**: Integrated Just-In-Time (JIT) metadata mapping. Industry data is now fetched at runtime as a JSON file from GitHub and merged in Pandas, removing the need for slow `JOIN`s in analytical SQL queries.
