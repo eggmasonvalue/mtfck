@@ -786,7 +786,7 @@ dev = [
 requires-dist = [
     { name = "duckdb", specifier = ">=1.2.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "nse", extras = ["server"], specifier = ">=2.0.0" },
+    { name = "nse", extras = ["server"], specifier = ">=2.1.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.5.2" },
     { name = "requests", specifier = ">=2.32.5" },
@@ -823,14 +823,14 @@ wheels = [
 
 [[package]]
 name = "nse"
-version = "2.0.0"
+version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mthrottle" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/47/6550da7a973dd7eb0ec7adabd6d1d582a02f23dc6bdab8fd1511de841c71/nse-2.0.0.tar.gz", hash = "sha256:6162fbbc630bbc82354c94ea71012090aeccb1abe93d842db927317d9e64f890", size = 31159, upload-time = "2026-01-12T17:30:22.539Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/22/ca265de57766736dffaf7d33f8a5b3bf2596d92eff243da257ed8cf99945/nse-3.1.0.tar.gz", hash = "sha256:7e9bbf7033ae5b8dedc4d4ca52bf8e70798fccf770df0e18e94f2020dbffce55", size = 31847, upload-time = "2026-06-02T17:37:54.488Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/46/859f1844025a8c2bebb1207a4277fd34a39718253583790b41ccf2dc2acc/nse-2.0.0-py3-none-any.whl", hash = "sha256:31684222cc75c571676d11dd3e480eeff561c5c1959461516b89780090439892", size = 30178, upload-time = "2026-01-12T17:30:21.458Z" },
+    { url = "https://files.pythonhosted.org/packages/89/3a/f0a414a36f4f721a666fb5ef564e8f591736b3624a5b40d7f86726190683/nse-3.1.0-py3-none-any.whl", hash = "sha256:f9f08ba47f18f57102a8b1d64942021734d578b808b2e54086913fb74edea6e4", size = 30885, upload-time = "2026-06-02T17:37:53.225Z" },
 ]
 
 [package.optional-dependencies]

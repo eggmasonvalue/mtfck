@@ -360,9 +360,9 @@ def get_next_trading_close(symbol, target_date):
         d = target_date + timedelta(days=i)
         try:
             hist = _fetch_equity_historical_data_with_retry(symbol, from_date=d, to_date=d)
-            if hist and "chClosingPrice" in hist[0]:
+            if hist and "CH_CLOSING_PRICE" in hist[0]:
                 try:
-                    return float(hist[0]["chClosingPrice"])
+                    return float(hist[0]["CH_CLOSING_PRICE"])
                 except Exception:
                     continue
         except Exception as e:
@@ -380,9 +380,9 @@ def get_ffmc_and_exposure(row, amt_field):
     Returns (ffmc_lakhs, exposure_pct) for a given row and amount field.
     """
     try:
-        q = nse.quote(row["symbol"], section="trade_info")
-        ffmc = q.get("marketDeptOrderBook", {}).get("tradeInfo", {}).get("ffmc", None)
-        ffmc_lakhs = ffmc * 100 if ffmc is not None else None
+        q = nse.quote(row["symbol"])
+        ffmc = q.get("tradeInfo", {}).get("ffmc", None)
+        ffmc_lakhs = ffmc / 100_000 if ffmc is not None else None  # ffmc is in rupees, convert to lakhs
         exposure_pct = (row[amt_field] / ffmc_lakhs) * 100 if ffmc_lakhs else None
     except Exception:
         ffmc_lakhs = None

@@ -12,8 +12,12 @@
 - **Manual Override**: Added `--from-date` support to the CLI and GitHub Action for manual historical data recovery.
 
 ### Changed
+- **Dependencies**: Upgraded `nse` to v3.1.0 and migrated API call sites to the new interface:
+  - `quote(symbol, section="trade_info")` → `quote(symbol)`: `section` parameter removed; FFMC is now at `tradeInfo.ffmc` (in rupees) instead of `marketDeptOrderBook.tradeInfo.ffmc` (in crores).
+  - Historical data key `chClosingPrice` → `CH_CLOSING_PRICE` in `fetch_equity_historical_data` responses.
+  - `download_document` now auto-extracts zip files; callers receive an extracted file path instead of a zip path.
 - **Architecture**: Completely removed Git submodules and Git LFS. Data is now fetched via standard HTTP streaming from the `MTFDB` repository.
-- **Dependencies**: Upgraded `nse` to `nse[server]>=2.1.0`.
+- **Dependencies (prior)**: Upgraded `nse` to `nse[server]>=2.1.0`.
 - **Reliability**: Enabled `server=True` in `NSE` initialization to ensure stable HTTP/2 connections in server environments.
 - **Database Refactor**: Completely flattened `stock_data` schema. Dropped `stock_master` table and integer IDs to directly store strings (`symbol`), relying on DuckDB's native dictionary encoding for compression.
 - **Ingestion**: Stripped out slow API fetches for industry data and complex ID-mapping logic from the CSV ingestion pipeline. Inserts are now practically instantaneous.
