@@ -347,7 +347,7 @@ wheels = [
 [[package]]
 name = "exchange-access"
 version = "0.1.0"
-source = { git = "https://github.com/eggmasonvalue/exchange-access.git?rev=main#530fb5a38f036f6df14ef6f66a1a4d61ecb25a75" }
+source = { git = "https://github.com/eggmasonvalue/exchange-access.git?rev=v0.1.0#530fb5a38f036f6df14ef6f66a1a4d61ecb25a75" }
 dependencies = [
     { name = "bse" },
     { name = "nse", extra = ["server"] },
@@ -808,7 +808,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.2.0" },
-    { name = "exchange-access", git = "https://github.com/eggmasonvalue/exchange-access.git?rev=main" },
+    { name = "exchange-access", git = "https://github.com/eggmasonvalue/exchange-access.git?rev=v0.1.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.5.2" },
