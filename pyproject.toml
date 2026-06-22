@@ -6,13 +6,15 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.10.8",
-    "nse[server]>=3.1.0",
     "pandas>=2.3.3",
     "plotly>=6.5.2",
     "requests>=2.32.5",
     "streamlit>=1.53.1",
     "duckdb>=1.2.0",
     "tenacity>=9.1.3",
+    # Shared exchange-access client (L1). Provides nse[server] transitively;
+    # pinned to main until a tag is cut.
+    "exchange-access @ git+https://github.com/eggmasonvalue/exchange-access.git@main",
 ]
 
 [project.scripts]
@@ -21,6 +23,10 @@ mtfck = "mtfck.main:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Required for the direct git reference (exchange-access).
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mtfck"]

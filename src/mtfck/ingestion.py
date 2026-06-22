@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from pathlib import Path
 import duckdb
 import pandas as pd
-from nse import NSE
+from exchange_access import NSEClient
 from .db import get_connection
 from .utils import retry_request
 import csv
@@ -12,7 +12,9 @@ import requests
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-nse = NSE(download_folder=DATA_DIR, server=True)
+# Underlying NSE instance from the shared L1 client (single construction
+# source). Calls remain wrapped by this app's generic retry_request.
+nse = NSEClient(str(DATA_DIR), server=True).nse
 
 
 def create_table() -> None:

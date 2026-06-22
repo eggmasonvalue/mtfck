@@ -58,6 +58,19 @@ wheels = [
 ]
 
 [[package]]
+name = "bse"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mthrottle" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d7/8d/4b77ef6f4d215dd290af294a9d1de765da5c438eb4876a7ad72d76644fca/bse-3.3.0.tar.gz", hash = "sha256:585011be0e524f9650dbf2bfa4877d9687648a0717e42f56afb7ee8608e7804d", size = 29583, upload-time = "2026-05-27T09:14:34.317Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/05/2da2adef9e129a90f245797b241530dac40f88c59dbb94c43b992c864840/bse-3.3.0-py3-none-any.whl", hash = "sha256:366312220615b3fff1a4c13ce26da5c0062151a97f7ab07bb53b8504ac680d42", size = 28845, upload-time = "2026-05-27T09:14:33.081Z" },
+]
+
+[[package]]
 name = "cachetools"
 version = "6.2.6"
 source = { registry = "https://pypi.org/simple" }
@@ -329,6 +342,16 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/26/0a/6ae31b2914b4dc34243279b2301554bcbc5f1a09ccc82600486c49ab71d1/duckdb-1.4.4-cp314-cp314-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d0440f59e0cd9936a9ebfcf7a13312eda480c79214ffed3878d75947fc3b7d6d", size = 20435641, upload-time = "2026-01-26T11:50:12.188Z" },
     { url = "https://files.pythonhosted.org/packages/d2/b1/fd5c37c53d45efe979f67e9bd49aaceef640147bb18f0699a19edd1874d6/duckdb-1.4.4-cp314-cp314-win_amd64.whl", hash = "sha256:59c8d76016dde854beab844935b1ec31de358d4053e792988108e995b18c08e7", size = 12762360, upload-time = "2026-01-26T11:50:14.76Z" },
     { url = "https://files.pythonhosted.org/packages/dd/2d/13e6024e613679d8a489dd922f199ef4b1d08a456a58eadd96dc2f05171f/duckdb-1.4.4-cp314-cp314-win_arm64.whl", hash = "sha256:53cd6423136ab44383ec9955aefe7599b3fb3dd1fe006161e6396d8167e0e0d4", size = 13458633, upload-time = "2026-01-26T11:50:17.657Z" },
+]
+
+[[package]]
+name = "exchange-access"
+version = "0.1.0"
+source = { git = "https://github.com/eggmasonvalue/exchange-access.git?rev=main#530fb5a38f036f6df14ef6f66a1a4d61ecb25a75" }
+dependencies = [
+    { name = "bse" },
+    { name = "nse", extra = ["server"] },
+    { name = "tenacity" },
 ]
 
 [[package]]
@@ -764,8 +787,8 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "exchange-access" },
     { name = "matplotlib" },
-    { name = "nse", extra = ["server"] },
     { name = "pandas" },
     { name = "plotly" },
     { name = "requests" },
@@ -785,8 +808,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.2.0" },
+    { name = "exchange-access", git = "https://github.com/eggmasonvalue/exchange-access.git?rev=main" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "nse", extras = ["server"], specifier = ">=2.1.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.5.2" },
     { name = "requests", specifier = ">=2.32.5" },

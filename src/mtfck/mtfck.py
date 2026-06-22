@@ -1,5 +1,5 @@
 from datetime import timedelta
-from nse import NSE
+from exchange_access import NSEClient
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,7 +11,9 @@ from .utils import retry_request
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-nse = NSE(download_folder=DATA_DIR, server=True)
+# Underlying NSE instance from the shared L1 client (single construction
+# source). Calls remain wrapped by this app's generic retry_request.
+nse = NSEClient(str(DATA_DIR), server=True).nse
 
 
 @retry_request()
