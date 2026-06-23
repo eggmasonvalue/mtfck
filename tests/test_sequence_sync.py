@@ -1,63 +1,60 @@
-import pytest
 from unittest.mock import patch
-from mtfck.ingestion import sync_sequence, create_table
-from mtfck.db import get_connection
+
 import mtfck.db
+from mtfck.db import get_connection
+from mtfck.ingestion import create_table
 
-@pytest.fixture
-def temp_db(tmp_path):
-    db_file = tmp_path / "test_seq.duckdb"
 
+def _reset_shared_conn() -> None:
     if mtfck.db._SHARED_CONN:
         mtfck.db._SHARED_CONN.close()
         mtfck.db._SHARED_CONN = None
 
-    with patch("mtfck.db.DB_PATH", str(db_file)):
+
+def test_create_table_initializes_expected_tables(tmp_path):
+    db_file = tmp_path / "stock_data.parquet"
+    summary_file = tmp_path / "daily_summary.parquet"
+
+    _reset_shared_conn()
+    with (
+        patch("mtfck.db.DB_PATH", str(db_file)),
+        patch("mtfck.db.SUMMARY_PATH", str(summary_file)),
+    ):
         create_table()
-        yield str(db_file)
+        conn = get_connection()
 
-    if mtfck.db._SHARED_CONN:
-        mtfck.db._SHARED_CONN.close()
-        mtfck.db._SHARED_CONN = None
+        table_names = {
+            row[0]
+            for row in conn.execute("SHOW TABLES").fetchall()
+        }
 
-def test_sync_sequence_lagging(temp_db):
-    conn = get_connection()
+    assert "stock_data" in table_names
+    assert "daily_summary" in table_names
 
-    # Use sequence once to initialize if needed
-    conn.execute("INSERT INTO stock_master (symbol, name) VALUES ('INIT', 'Init Co')")
+    _reset_shared_conn()
 
-    # Initial state: sequence at 1
-    seq_val = conn.execute("SELECT last_value FROM duckdb_sequences() WHERE sequence_name='stock_id_seq'").fetchone()[0]
-    assert seq_val == 1
 
-    # Insert manually bypassing sequence (ID 10)
-    conn.execute("INSERT INTO stock_master (stock_id, symbol, name) VALUES (10, 'TEST', 'Test Co')")
+def test_create_table_allows_stock_data_roundtrip(tmp_path):
+    db_file = tmp_path / "stock_data.parquet"
+    summary_file = tmp_path / "daily_summary.parquet"
 
-    # Call sync
-    sync_sequence()
+    _reset_shared_conn()
+    with (
+        patch("mtfck.db.DB_PATH", str(db_file)),
+        patch("mtfck.db.SUMMARY_PATH", str(summary_file)),
+    ):
+        create_table()
+        conn = get_connection(read_only=False)
+        conn.execute(
+            """
+            INSERT INTO stock_data (date, symbol, qty_financed, amt_financed)
+            VALUES ('2026-02-08', 'ARISINFRA', 1000, 50000)
+            """
+        )
+        row = conn.execute(
+            "SELECT symbol, qty_financed, amt_financed FROM stock_data WHERE date='2026-02-08'"
+        ).fetchone()
 
-    # Check sequence
-    seq_val = conn.execute("SELECT last_value FROM duckdb_sequences() WHERE sequence_name='stock_id_seq'").fetchone()[0]
-    assert seq_val >= 10
+    assert row == ("ARISINFRA", 1000, 50000.0)
 
-    # Next insert using sequence should be > 10 (likely 11)
-    conn.execute("INSERT INTO stock_master (symbol, name) VALUES ('NEXT', 'Next Co')")
-    new_id = conn.execute("SELECT stock_id FROM stock_master WHERE symbol='NEXT'").fetchone()[0]
-    assert new_id > 10
-
-def test_sync_sequence_ok(temp_db):
-    conn = get_connection()
-
-    # Use sequence normally
-    conn.execute("INSERT INTO stock_master (symbol, name) VALUES ('A', 'A Co')") # ID 1, Seq 1
-
-    sync_sequence()
-
-    # Seq should still be fine (1 or more)
-    seq_val = conn.execute("SELECT last_value FROM duckdb_sequences() WHERE sequence_name='stock_id_seq'").fetchone()[0]
-    assert seq_val >= 1
-
-    # Next insert
-    conn.execute("INSERT INTO stock_master (symbol, name) VALUES ('B', 'B Co')")
-    new_id = conn.execute("SELECT stock_id FROM stock_master WHERE symbol='B'").fetchone()[0]
-    assert new_id > 1
+    _reset_shared_conn()
