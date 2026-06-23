@@ -1,6 +1,4 @@
 import pytest
-from tenacity import RetryError
-import requests
 from unittest.mock import MagicMock
 from mtfck.utils import retry_request
 
