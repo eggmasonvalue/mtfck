@@ -6,29 +6,20 @@ import matplotlib.pyplot as plt
 import requests
 from .ingestion import create_table, download_and_store_range
 from .db import get_connection, DB_PATH
-from .utils import retry_request
+from industry_map_client import get_industry_data
 
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
 # Underlying NSE instance from the shared L1 client (single construction
-# source). Calls remain wrapped by this app's generic retry_request.
-nse = NSEClient(str(DATA_DIR), server=True).nse
-
-
-@retry_request()
-def _fetch_industry_data_unsafe() -> dict:
-    """Fetch the latest industry mapping JSON from GitHub (may raise exception)."""
-    url = "https://raw.githubusercontent.com/eggmasonvalue/stock-industry-map-in/main/out/industry_data.json"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    return r.json().get("data", {})
+# source). Uses the native bulk retry profile.
+nse = NSEClient(str(DATA_DIR), server=True, retry_profile='bulk').nse
 
 
 def fetch_industry_data() -> dict:
     """Fetch the latest industry mapping JSON from GitHub."""
     try:
-        return _fetch_industry_data_unsafe()
+        return get_industry_data()
     except Exception as e:
         print(f"Error fetching industry data after retries: {e}")
         return {}
@@ -349,19 +340,13 @@ def get_prev_available_date(target_date):
     return None
 
 
-@retry_request()
-def _fetch_equity_historical_data_with_retry(symbol, from_date, to_date):
-    """Fetch equity historical data with retry."""
-    return nse.fetch_equity_historical_data(symbol, from_date=from_date, to_date=to_date)
-
-
 def get_next_trading_close(symbol, target_date):
     """Return closing price for the next available trading day >= target_date."""
     max_tries = 15
     for i in range(max_tries):
         d = target_date + timedelta(days=i)
         try:
-            hist = _fetch_equity_historical_data_with_retry(symbol, from_date=d, to_date=d)
+            hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
             if hist and "CH_CLOSING_PRICE" in hist[0]:
                 try:
                     return float(hist[0]["CH_CLOSING_PRICE"])

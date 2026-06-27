@@ -2,9 +2,8 @@ from datetime import date, timedelta
 from pathlib import Path
 import duckdb
 import pandas as pd
-from exchange_access import NSEClient
+from exchange_access import NSEClient, get_retry_decorator
 from .db import get_connection
-from .utils import retry_request
 import csv
 import io
 import requests
@@ -13,8 +12,8 @@ DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
 # Underlying NSE instance from the shared L1 client (single construction
-# source). Calls remain wrapped by this app's generic retry_request.
-nse = NSEClient(str(DATA_DIR), server=True).nse
+# source). Uses the native bulk retry profile.
+nse = NSEClient(str(DATA_DIR), server=True, retry_profile='bulk').nse
 
 
 def create_table() -> None:
@@ -119,7 +118,6 @@ def parse_and_insert(csv_path: str, date_str: str) -> None:
         print(f"Warning: Could not delete {csv_path}: {e}")
 
 
-@retry_request()
 def _download_for_date(d: date) -> None:
     """
     Download and parse report for a single date with retry mechanism.
@@ -171,7 +169,7 @@ def download_and_store_range(from_date: date, to_date: date) -> None:
             print(f"Failed for {d}: {e}")
 
 
-@retry_request()
+@get_retry_decorator('bulk')
 def _download_symbol_change_csv(url: str) -> str:
     """
     Download symbol change CSV with retry.
