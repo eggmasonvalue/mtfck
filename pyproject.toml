@@ -16,8 +16,6 @@ dependencies = [
     "exchange-access @ git+https://github.com/eggmasonvalue/exchange-access.git",
     "industry-data-in",
     "markets-house",
-    "nse-xbrl-parser",
-    "screener-scrape",
 ]
 
 [project.scripts]
@@ -37,8 +35,6 @@ packages = ["src/mtfck"]
 [tool.uv.sources]
 industry-data-in = { git = "https://github.com/eggmasonvalue/stock-industry-map-in.git" }
 markets-house = { git = "https://github.com/eggmasonvalue/markets-house.git" }
-nse-xbrl-parser = { git = "https://github.com/eggmasonvalue/nse-xbrl-parser.git" }
-screener-scrape = { git = "https://github.com/eggmasonvalue/screener-scrape.git" }
 
 [dependency-groups]
 dev = [
