@@ -1,5 +1,7 @@
 # DECISIONS
 
+This is a curated ADR file for durable, non-obvious project-level choices. It is not a changelog or implementation worklog.
+
 ## 2026-06-22 — Construct NSE access through exchange-access client wrapper
 
 Context: NSE integration points existed in app-local modules and needed consolidation on the shared `exchange-access` abstraction.

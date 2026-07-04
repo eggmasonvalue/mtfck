@@ -1,45 +1,61 @@
-# AGENTS
+# AGENTS.md
 
-This repository uses an agent-maintained docs system. Keep docs concise, accurate, and tied to durable project intent.
+Agent-maintained docs are for durable context only. Code is the source of truth;
+docs route agents and preserve non-obvious project rationale.
 
-## Hard guardrails
+## Guardrails
 
-- Never commit directly to `main`.
-- Always work on a branch and open a PR.
-- Treat code as source of truth for behavior; docs capture structure and tradeoffs that code cannot explain alone.
+- Never commit directly to `main`; work on a branch and open a PR.
+- Keep changes scoped; avoid incidental refactors.
+- Verify behavior with commands before documenting claims.
 
-## Read routing (do not read everything by default)
+## Read routing
 
-- Read `context/MAP.md` before changing module boundaries, ownership, or data flow.
-- Read `context/DECISIONS.md` before changing behavior that may re-open an intentional tradeoff.
-- Read `context/CONVENTIONS.md` while writing or refactoring code.
-- At task start, run `todo list`; claim work with `todo claim <id>` before editing shared areas.
+- Read `context/MAP.md` before changing module layout, ownership, or data flow.
+- Read `context/DECISIONS.md` before changing a recorded tradeoff.
+- Read `context/CONVENTIONS.md` while writing or editing code.
+- Run `todo list` at task start; `todo claim <id>` before editing orchestrated
+  todos.
 
-## Write triggers (event-based updates)
+## Write triggers
 
-- Module/file added, removed, moved, or data flow changed -> update `context/MAP.md`.
-- Intentional tradeoff made or reversed -> append entry to `context/DECISIONS.md`.
-- New repeatable engineering rule adopted -> update `context/CONVENTIONS.md`.
-- User-facing behavior, setup, or operations changed -> update `README.md`.
+- `context/MAP.md`: files/modules added, removed, moved, or data flow changed.
+- `context/DECISIONS.md`: only choices that pass the decision-log bar below.
+- `context/CONVENTIONS.md`: new repeatable coding/testing rule.
+- `README.md`: user-facing setup or usage changed.
+
+## Decision-log bar
+
+`context/DECISIONS.md` is a curated ADR file, not a worklog. Append only when a
+choice changes architecture, public behavior, data shape, dependency ownership,
+or an expensive migration path **and** future agents need non-obvious rationale
+to avoid re-litigating it.
+
+Do not append decisions for bug fixes, cleanup, dead-code removal, renames,
+mechanical refactors, one-feature implementation tactics, or routine test/lint
+chores. Before appending, prefer amending or superseding an existing decision.
+When in doubt, do not append; keep task-local rationale in the todo, PR, commit
+message, or final response.
 
 ## What not to document
 
-- Do not keep changelogs/worklogs in Markdown.
-- Do not keep feature status checklists that duplicate code and tests.
-- Do not restate obvious code behavior.
+- Changelogs/worklogs; git already has history.
+- Feature/status checklists duplicated from code/tests.
+- Restatements of obvious code behavior.
+- Decisions that fail the decision-log bar.
 
 ## CONVENTIONS vs DECISIONS
 
-- `CONVENTIONS.md` contains imperative rules only, with no rationale.
-- If a rule needs a "because", record that rationale in `DECISIONS.md` and keep the convention terse.
+- `CONVENTIONS.md` contains terse imperative rules only.
+- Rationale belongs in `DECISIONS.md` only if it passes the decision-log bar.
 
-## Todos and durable decisions
+## Todos ↔ Decisions
 
-- Todos are stateful records under `.pi/todos`, not scratch notes.
-- Keep working context in todo bodies while a task is active.
-- Before closing a todo that involved a real tradeoff, move the durable rationale to `context/DECISIONS.md`.
-- Closed/done todos are not permanent archive.
+Use todos as stateful task records, not scratch notes. Keep live working context
+in the todo body. Before closing a todo, graduate durable rationale to
+`context/DECISIONS.md` only if it passes the decision-log bar.
 
 ## Definition of Done
 
-A task is complete only when code, tests, and matching durable docs are all updated. If a tradeoff changed and `DECISIONS.md` was not updated, the task is not done.
+Code, tests/lint, and durable docs must agree. If a change passes the
+decision-log bar, its rationale must be recorded before the task is done.
