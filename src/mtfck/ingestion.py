@@ -11,9 +11,8 @@ import requests
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-# Underlying NSE instance from the shared L1 client (single construction
-# source). Uses the native bulk retry profile.
-nse = NSEClient(str(DATA_DIR), server=True, retry_profile='bulk').nse
+# Keep the wrapper lazy: upstream construction fetches cookies over the network.
+nse = NSEClient(str(DATA_DIR), retry_profile='bulk')
 
 
 def create_table() -> None:
@@ -126,6 +125,8 @@ def _download_for_date(d: date) -> None:
     print(f"Processing {d}")
     url = f"https://nsearchives.nseindia.com/content/equities/mrg_trading_{d.strftime('%d%m%y')}.zip"
     print(f"Downloading from: {url}")
+    # nse 5 reuses existing downloads; discard stale/partial ZIPs from failed runs.
+    (DATA_DIR / url.rsplit('/', 1)[-1]).unlink(missing_ok=True)
     result = nse.download_document(url=url, folder=DATA_DIR)
     if not result.is_file():
         result.unlink(missing_ok=True)

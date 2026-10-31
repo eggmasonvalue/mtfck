@@ -449,6 +449,7 @@ if show_trend_clicked:
                     trend_symbol_input,
                     from_date=curr_from,
                     to_date=curr_to,
+                    adjusted=False,
                 )
                 if isinstance(chunk, list):
                     price_data.extend(chunk)
@@ -458,7 +459,10 @@ if show_trend_clicked:
 
         if price_data:
             price_df = pd.DataFrame(price_data)
-            timestamp_col = "mtimestamp" if "mtimestamp" in price_df.columns else "CH_TIMESTAMP"
+            timestamp_col = next(
+                (col for col in ("mtimestamp", "mTIMESTAMP", "CH_TIMESTAMP") if col in price_df.columns),
+                "CH_TIMESTAMP",
+            )
             closing_col = "chClosingPrice" if "chClosingPrice" in price_df.columns else "CH_CLOSING_PRICE"
 
             if timestamp_col in price_df.columns and closing_col in price_df.columns:

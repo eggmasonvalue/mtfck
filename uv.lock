@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -59,15 +59,15 @@ wheels = [
 
 [[package]]
 name = "bse"
-version = "3.3.0"
+version = "3.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mthrottle" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d7/8d/4b77ef6f4d215dd290af294a9d1de765da5c438eb4876a7ad72d76644fca/bse-3.3.0.tar.gz", hash = "sha256:585011be0e524f9650dbf2bfa4877d9687648a0717e42f56afb7ee8608e7804d", size = 29583, upload-time = "2026-05-27T09:14:34.317Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/a4/3daba6911d56a61cbf4bbacf9ecf906116841cbd6478d16d55c0beec549c/bse-3.3.4.tar.gz", hash = "sha256:dc5da2d1a0e52b2d7858524d50034d83b64bb47d5bf8397a646503d0b957ef13", size = 29837, upload-time = "2026-10-17T07:51:28.908Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/05/2da2adef9e129a90f245797b241530dac40f88c59dbb94c43b992c864840/bse-3.3.0-py3-none-any.whl", hash = "sha256:366312220615b3fff1a4c13ce26da5c0062151a97f7ab07bb53b8504ac680d42", size = 28845, upload-time = "2026-05-27T09:14:33.081Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/80/3ef2b692ad69b0767209022fe5df93434ebcdf8d50321cb7dab74c2522b7/bse-3.3.4-py3-none-any.whl", hash = "sha256:ddff2312cdd37247622da4ecae37fbdb1986fca0a8d8a3aefe12af2965fe915b", size = 29088, upload-time = "2026-10-17T07:51:27.629Z" },
 ]
 
 [[package]]
@@ -357,12 +357,14 @@ wheels = [
 
 [[package]]
 name = "exchange-access"
-version = "0.2.2"
-source = { git = "https://github.com/eggmasonvalue/exchange-access.git#02bbf6af8ecde29b78126d08ef97167c9148d90f" }
+version = "0.3.0"
+source = { git = "https://github.com/eggmasonvalue/exchange-access.git#26c756f77e5d81313e20c91d84262efc243c08a0" }
 dependencies = [
     { name = "bse" },
-    { name = "nse", extra = ["server"] },
+    { name = "httpx" },
+    { name = "nse", extra = ["http2"] },
     { name = "tenacity" },
+    { name = "tzdata" },
 ]
 
 [[package]]
@@ -954,18 +956,19 @@ wheels = [
 
 [[package]]
 name = "nse"
-version = "3.1.0"
+version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mthrottle" },
+    { name = "httpx" },
+    { name = "pyrate-limiter" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/22/ca265de57766736dffaf7d33f8a5b3bf2596d92eff243da257ed8cf99945/nse-3.1.0.tar.gz", hash = "sha256:7e9bbf7033ae5b8dedc4d4ca52bf8e70798fccf770df0e18e94f2020dbffce55", size = 31847, upload-time = "2026-06-02T17:37:54.488Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/a3/7b553d93157e01a7a0adbf98611ece13845cfffcc7d2ce7e2d6d9319eb5b/nse-5.1.0.tar.gz", hash = "sha256:e78759b4ff212ae6bff6d84306eb92f274ce519e5c7e10738febdc3d5b6d35d9", size = 47802, upload-time = "2026-10-10T08:43:27.529Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/3a/f0a414a36f4f721a666fb5ef564e8f591736b3624a5b40d7f86726190683/nse-3.1.0-py3-none-any.whl", hash = "sha256:f9f08ba47f18f57102a8b1d64942021734d578b808b2e54086913fb74edea6e4", size = 30885, upload-time = "2026-06-02T17:37:53.225Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/9b/5d331e407b9f93f42cf9a647edd4a8307190f275de5a76c2ac00417865a4/nse-5.1.0-py3-none-any.whl", hash = "sha256:088c762b232ea9f180a624ae55f1ec6a1f49ff7d7d28b23871215a427ce60f16", size = 49515, upload-time = "2026-10-10T08:43:26.297Z" },
 ]
 
 [package.optional-dependencies]
-server = [
+http2 = [
     { name = "httpx", extra = ["http2"] },
 ]
 
@@ -1290,6 +1293,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pyrate-limiter"
+version = "4.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/0b/f69f1614940f29d51e31d4fe8de69b2b4d411094ba3c77f50da34dfb63c6/pyrate_limiter-4.5.1.tar.gz", hash = "sha256:7f03c6a9235b00a4ba3c7b1e8cb6b23fbacc9d40b09f326220917a12ef22cc09", size = 129966, upload-time = "2026-10-20T13:51:27.935Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/72/bf7279ae5799e1b54cf137859c17755446b2d2b6194606bda41753a43f76/pyrate_limiter-4.5.1-py3-none-any.whl", hash = "sha256:bb8dd2926b0679e4ada6629a865e85daa5599268f930c61a8992dafa8bf3ba0d", size = 57873, upload-time = "2026-10-20T13:51:26.584Z" },
 ]
 
 [[package]]

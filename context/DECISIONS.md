@@ -5,7 +5,7 @@ This is a curated ADR file for durable, non-obvious project-level choices. It is
 ## 2026-06-22 — Construct NSE access through exchange-access client wrapper
 
 Context: NSE integration points existed in app-local modules and needed consolidation on the shared `exchange-access` abstraction.
-Decision: `src/mtfck/ingestion.py` and `src/mtfck/mtfck.py` each construct NSE access via `NSEClient(str(DATA_DIR), server=True).nse`, and no direct `nse.NSE(...)` constructor is kept in this repo.
+Decision: `src/mtfck/ingestion.py` and `src/mtfck/mtfck.py` each retain a lazy `NSEClient(str(DATA_DIR), retry_profile='bulk')`, and no direct `nse.NSE(...)` constructor is kept in this repo. With exchange-access 0.3.0 / nse 5, upstream construction is deferred until first use to avoid cookie-fetch network I/O during imports. Curated quote/history calls use shared retries; uncurated downloads/index history still delegate upstream. Equity history explicitly uses `adjusted=False` to preserve the app's unadjusted price semantics rather than the wrapper's adjusted default.
 Tradeoff: This adds a cross-repo dependency and version coordination burden, but centralizes NSE session/bootstrap behavior on the shared client path used across constellation repos.
 Status: active
 
