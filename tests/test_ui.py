@@ -21,7 +21,7 @@ def streamlit_app():
     # Start the Streamlit app
     # Using 'streamlit run' directly assuming it's in the environment or via uv run
     process = subprocess.Popen(
-        ["uv", "run", "streamlit", "run", "app.py", "--server.port", "8502", "--server.headless", "true"],
+        ["uv", "run", "--no-sync", "streamlit", "run", "app.py", "--server.port", "8502", "--server.headless", "true"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

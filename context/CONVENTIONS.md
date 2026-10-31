@@ -5,7 +5,8 @@
 - Run lint with `uv run ruff check .` before opening a PR.
 - Run tests with `uv run pytest -q` before opening a PR.
 - Lint docs with `npx --yes markdownlint-cli2 AGENTS.md README.md "context/**/*.md"` before opening a PR.
-- Keep NSE client construction in app modules via `NSEClient(...).nse`.
+- Retain lazy `NSEClient(...)` wrappers in app modules; do not access `.nse` at import time.
+- Pass `adjusted=False` for raw historical equity prices.
 - Wrap plain `requests` network calls with `retry_request()`.
 - Use `get_connection()` from `src/mtfck/db.py` for SQL access; do not open ad-hoc DuckDB connections in feature code.
 - Append to `context/DECISIONS.md` only when the choice crosses the decision-log bar in `AGENTS.md`.

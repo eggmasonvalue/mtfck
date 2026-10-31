@@ -10,7 +10,7 @@
 - `src/mtfck/utils.py` — Generic tenacity retry decorator (`retry_request`) used around plain HTTP request flows.
 - `tests/` — unit tests for imports, retry behavior, symbol-merge behavior, and sequence sync expectations.
 - `assets/` — README/UI screenshots.
-- `data/` — runtime cache for NSE cookies/download artifacts.
+- `data/` — runtime NSE download artifacts; exchange-access keeps cookies in memory.
 - `mtf_data/` (runtime generated, gitignored) — local parquet snapshots used by app/query paths.
 
 ## MTF ingestion pipeline
@@ -20,7 +20,7 @@ flowchart TD
     A[mtfck update CLI\nmain.py] --> B[update_to_today\ningestion.py]
     B --> C[process_symbol_changes\nplain requests.get + retry_request]
     B --> D[download_and_store_range]
-    D --> E[_download_for_date\nNSEClient(...).nse.download_document]
+    D --> E[_download_for_date\nlazy NSEClient.download_document delegation]
     E --> F[parse_and_insert]
     F --> G[(DuckDB in-memory\nstock_data + daily_summary)]
     G --> H[COPY TO parquet\nmtf_data/*.parquet]
@@ -36,7 +36,7 @@ flowchart TD
     C --> D[(DuckDB in-memory tables\nloaded from parquet)]
     A --> E[mtfck.py analytics functions]
     E --> D
-    E --> F[NSEClient(...).nse for quotes/history]
+    E --> F[lazy NSEClient for quotes/history]
     E --> G[Industry JSON fetch\nraw GitHub + retry_request]
     A --> H[Tables + Plotly charts]
 ```

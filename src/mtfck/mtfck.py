@@ -3,7 +3,6 @@ from exchange_access import NSEClient
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
-import requests
 from .ingestion import create_table, download_and_store_range
 from .db import get_connection, DB_PATH
 from industry_map_client import get_industry_data
@@ -11,9 +10,8 @@ from industry_map_client import get_industry_data
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(exist_ok=True)
 
-# Underlying NSE instance from the shared L1 client (single construction
-# source). Uses the native bulk retry profile.
-nse = NSEClient(str(DATA_DIR), server=True, retry_profile='bulk').nse
+# Keep the wrapper lazy: upstream construction fetches cookies over the network.
+nse = NSEClient(str(DATA_DIR), retry_profile='bulk')
 
 
 def fetch_industry_data() -> dict:
@@ -346,7 +344,7 @@ def get_next_trading_close(symbol, target_date):
     for i in range(max_tries):
         d = target_date + timedelta(days=i)
         try:
-            hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d)
+            hist = nse.fetch_equity_historical_data(symbol, from_date=d, to_date=d, adjusted=False)
             if hist and "CH_CLOSING_PRICE" in hist[0]:
                 try:
                     return float(hist[0]["CH_CLOSING_PRICE"])
