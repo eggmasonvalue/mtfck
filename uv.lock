@@ -358,7 +358,7 @@ wheels = [
 [[package]]
 name = "exchange-access"
 version = "0.3.0"
-source = { git = "https://github.com/eggmasonvalue/exchange-access.git#26c756f77e5d81313e20c91d84262efc243c08a0" }
+source = { git = "https://github.com/eggmasonvalue/exchange-access.git#6dd62111d33ae06c60b954585371cfc319644e08" }
 dependencies = [
     { name = "bse" },
     { name = "httpx" },
